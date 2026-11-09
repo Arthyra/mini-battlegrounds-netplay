@@ -1,0 +1,9 @@
+# Keep this source repository independent of the local game and extracted assets.
+/*
+!/.gitignore
+!/README.md
+!/server.py
+!/prepare-lan-client.py
+!/patch-local-login.py
+!/patch-lan-combat.cs
+!/export-local-data.py
