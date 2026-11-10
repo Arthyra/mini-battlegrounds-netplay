@@ -110,9 +110,9 @@ public sealed class LanRoomUI : MonoBehaviour
         rename.name = "LanRename";
         rename.transform.SetParent(root, false);
         var renameRect = (RectTransform)rename.transform;
-        renameRect.anchorMin = renameRect.anchorMax = new Vector2(1, 0);
-        renameRect.pivot = new Vector2(1, 0);
-        renameRect.anchoredPosition = new Vector2(-12, 150);
+        renameRect.anchorMin = renameRect.anchorMax = new Vector2(0, 0);
+        renameRect.pivot = new Vector2(0, 0);
+        renameRect.anchoredPosition = new Vector2(24, 150);
         renameRect.sizeDelta = new Vector2(96, 34);
         var oldRenameText = rename.transform.Find("Text");
         if (oldRenameText != null)
@@ -285,3 +285,4 @@ public sealed class LanRoomUI : MonoBehaviour
         }
     }
 }
+
