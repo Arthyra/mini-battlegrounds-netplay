@@ -4,7 +4,7 @@
 
 ## 仓库与本机位置
 
-- 当前项目根目录是 `C:/GameInstall/mini battleground/map102-test`。从这个目录运行服务器和构建命令。
+- 当前项目根目录是 `C:/GameInstall/mini-battlegrounds-lan/map102-test`。从这个目录运行服务器和构建命令。
 - GitHub 私有仓库是 [Ash-Rise/mini-battlegrounds-lan](https://github.com/Ash-Rise/mini-battlegrounds-lan)。当前远端 `main` 包含房间 UI、LAN 下载、多局重置、Windows 玩家启动器、公网 ECS 和 LanRoomUI 改名，对应 [私有 Release lan-player-v0.6](https://github.com/Ash-Rise/mini-battlegrounds-lan/releases/tag/lan-player-v0.6)。接手先看 `git status -sb` 和 `git diff`。
 - Windows 客户端在项目的 `client/CrazyShooter.exe`，基于 Steam Build 2655148（32 位 Unity 5.6.3、Mono），已准备好 102 资源和本地登录。APK 来源是 `C:/Workspace/Mini+Battlegrounds_1.0.5_APKPure.apk`（Unity 2017.4），两套资源不能整包混用。
 - 前一环境的分析和构建材料在 `C:/Users/Example/Documents/Codex/2026-11-09/mini-battleground-steam-4399-qq-22/work`。以下把它简称为 `work`。新 harness 未必附带这个目录，需要能访问同一台 Windows 的文件。仓库单独克隆只有源码。玩家可以从私有 Release 下载已经准备好的客户端。
@@ -99,6 +99,7 @@ $csc = "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
 运行 `python .\build-release.py --version 0.4` 会自动编译启动器、打包 `dist/Mini-Battlegrounds-LAN-Windows.zip`、写 `dist/release-v0.4.json`（大小、SHA256、提交、时间）；加 `--publish` 会创建并设为 Latest 的 GitHub Release。打包源的 `Assembly-CSharp.dll` 和 `LanRoomUI.dll` 都须支持 `-lan-host`。
 
 本机项目的 `client/` 目前仍是启动器改动前的房主测试构建，可继续用于固定地址的邀请 ZIP。要重新生成 Release 玩家包，使用已验证的 `work/map102-player-stage/client`，或按上面的步骤重建两份 DLL 后再打包。
+
 
 
 
