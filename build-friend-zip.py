@@ -37,6 +37,13 @@ def build(output, client, host=None, version=None):
                         "/reference:System.IO.Compression.FileSystem.dll", f"/out:{stage / 'Start Game.exe'}",
                         str(ROOT / "lan-launcher.cs")], check=True)
         copy_runtime(stage / "client", client)
+        server_source = ROOT / "dist" / "server"
+        if (server_source / "server.exe").is_file():
+            server_stage = stage / "server"
+            server_stage.mkdir()
+            shutil.copy2(server_source / "server.exe", server_stage / "server.exe")
+            for name in ("map102-vehicle-obstacles.json", "map102-vehicle-props.json", "skin-catalog.json"):
+                shutil.copy2(server_source / name, server_stage / name)
         if host:
             (stage / "server.txt").write_text(str(host) + "\n", encoding="ascii")
         if version:

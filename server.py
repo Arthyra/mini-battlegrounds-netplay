@@ -12,8 +12,11 @@ from pathlib import Path
 from random import choice, uniform
 from secrets import randbits, token_hex
 import struct
+import sys
 import time
 import unicodedata
+
+BASE_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
 
 HOST = "127.0.0.1"
 LOGIN_PORT = 43120
@@ -529,7 +532,7 @@ class Match(asyncio.DatagramProtocol):
         self.owner = None
         self.battle_id = BATTLE_ID
         self.vehicle_skin_offset = 0 if stock_vehicles else 3
-        root = Path(__file__).resolve().parent
+        root = BASE_DIR
         self.obstacles = json.loads((root / "map102-vehicle-obstacles.json").read_text(encoding="utf-8"))
         props_file = root / "map102-vehicle-props.json"
         if not props_file.is_file():
@@ -654,7 +657,7 @@ class Match(asyncio.DatagramProtocol):
         return True
 
     def admin_logs(self):
-        path = Path(__file__).resolve().parent / "server.log"
+        path = BASE_DIR / "server.log"
         try:
             lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
         except OSError as error:
@@ -1701,7 +1704,7 @@ class LanDiscovery(asyncio.DatagramProtocol):
 
 async def main(host, bind, size, stock_vehicles=False, share=False, owner_profile=None,
                admin_port=8080, admin_token=None):
-    root = Path(__file__).resolve().parent
+    root = BASE_DIR
     match = Match(host, size, stock_vehicles, owner_profile)
     async with (
         await asyncio.start_server(handler(match.login), bind, LOGIN_PORT),

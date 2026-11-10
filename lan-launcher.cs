@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Net;
+using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.IO.Compression;
 using System.Security.Cryptography;
@@ -21,7 +22,9 @@ internal sealed class LanLauncher : Form
     private readonly ComboBox address = new ComboBox();
     private readonly Button join = new Button();
     private readonly Button search = new Button();
+    private readonly Button create = new Button();
     private readonly Label status = new Label();
+    private Process serverProcess;
     private readonly string profile;
 
     [STAThread]
@@ -55,11 +58,13 @@ internal sealed class LanLauncher : Form
 
         status.SetBounds(15, 15, 430, 40);
         address.SetBounds(15, 60, 430, 26);
-        search.SetBounds(15, 103, 110, 28);
+        search.SetBounds(135, 103, 110, 28);
         search.Text = "\u641c\u7d22\u5c40\u57df\u7f51";
+        create.SetBounds(15, 103, 110, 28);
+        create.Text = "\u521b\u5efa\u623f\u95f4";
         join.SetBounds(320, 103, 125, 28);
         join.Text = "\u52a0\u5165\u623f\u95f4";
-        Controls.AddRange(new Control[] { status, address, search, join });
+        Controls.AddRange(new Control[] { status, address, create, search, join });
         AcceptButton = join;
         if (File.Exists(ServerFile))
         {
@@ -74,6 +79,8 @@ internal sealed class LanLauncher : Form
         };
         search.Click += async (sender, args) => await FindAndShow(false);
         join.Click += (sender, args) => JoinSelected();
+        create.Click += (sender, args) => ToggleRoom();
+        FormClosing += (sender, args) => StopRoom();
     }
 
     private async Task FindAndShow(bool autoJoin)
@@ -305,6 +312,141 @@ internal sealed class LanLauncher : Form
         return end < 0 ? "" : json.Substring(quote + 1, end - quote - 1);
     }
 
+    private static string LanAddress()
+    {
+        string fallback = "";
+        foreach (var network in NetworkInterface.GetAllNetworkInterfaces())
+        {
+            if (network.OperationalStatus != OperationalStatus.Up ||
+                network.NetworkInterfaceType == NetworkInterfaceType.Loopback ||
+                network.NetworkInterfaceType == NetworkInterfaceType.Tunnel)
+                continue;
+            var name = (network.Name + " " + network.Description).ToLowerInvariant();
+            if (name.Contains("vmware") || name.Contains("virtualbox") || name.Contains("hyper-v") ||
+                name.Contains("vethernet") || name.Contains("wsl") || name.Contains("tap-") ||
+                name.Contains("wi-fi direct") || name.Contains("bluetooth") || name.Contains("zerotier") ||
+                name.Contains("tailscale"))
+                continue;
+            var properties = network.GetIPProperties();
+            var gateway = false;
+            foreach (var item in properties.GatewayAddresses)
+                if (item.Address.AddressFamily == AddressFamily.InterNetwork &&
+                    !item.Address.Equals(IPAddress.Any) && !IPAddress.IsLoopback(item.Address))
+                    gateway = true;
+            foreach (var unicast in properties.UnicastAddresses)
+            {
+                var address = unicast.Address;
+                if (address.AddressFamily != AddressFamily.InterNetwork || IPAddress.IsLoopback(address))
+                    continue;
+                var bytes = address.GetAddressBytes();
+                if (bytes[0] == 169 && bytes[1] == 254)
+                    continue;
+                var isPrivate = bytes[0] == 10 || (bytes[0] == 192 && bytes[1] == 168) ||
+                    (bytes[0] == 172 && bytes[1] >= 16 && bytes[1] <= 31);
+                if (!isPrivate)
+                    continue;
+                if (gateway)
+                    return address.ToString();
+                if (fallback.Length == 0)
+                    fallback = address.ToString();
+            }
+        }
+        return fallback.Length > 0 ? fallback : "127.0.0.1";
+    }
+    private void ToggleRoom()
+    {
+        if (serverProcess != null && !serverProcess.HasExited)
+        {
+            StopRoom();
+            return;
+        }
+        var serverExe = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "server", "server.exe");
+        if (!File.Exists(serverExe))
+        {
+            MessageBox.Show("这个客户端包没有附带服务端，不能创建房间。\n请使用房主版，或连接到已有房间。",
+                "Mini Battlegrounds");
+            return;
+        }
+        var host = LanAddress();
+        try
+        {
+            var info = new ProcessStartInfo(serverExe,
+                "--players 8 --host " + host + " --bind " + host + " --owner-profile slot-1 --admin-port 0")
+            {
+                WorkingDirectory = Path.GetDirectoryName(serverExe),
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true
+            };
+            serverProcess = Process.Start(info);
+            serverProcess.OutputDataReceived += (sender, args) => { };
+            serverProcess.ErrorDataReceived += (sender, args) => { };
+            serverProcess.BeginOutputReadLine();
+            serverProcess.BeginErrorReadLine();
+            if (!WaitForPort(host, 43120, 12000))
+            {
+                StopRoom();
+                MessageBox.Show("服务端没有在 12 秒内启动。请检查防火墙或服务端文件。", "Mini Battlegrounds");
+                return;
+            }
+            address.Text = host;
+            status.Text = "局域网房间已创建：" + host;
+            create.Text = "关闭房间";
+            Process.Start(new ProcessStartInfo(Path.Combine(Client, "CrazyShooter.exe"),
+                "-screen-fullscreen 0 -lan-host=" + host + " -lan-profile=slot-1")
+            {
+                WorkingDirectory = Client
+            });
+        }
+        catch (Exception error)
+        {
+            StopRoom();
+            MessageBox.Show("创建房间失败：\n" + error.Message, "Mini Battlegrounds");
+        }
+    }
+
+    private static bool WaitForPort(string host, int port, int timeout)
+    {
+        var deadline = DateTime.UtcNow.AddMilliseconds(timeout);
+        while (DateTime.UtcNow < deadline)
+        {
+            try
+            {
+                using (var client = new TcpClient())
+                {
+                    var task = client.ConnectAsync(host, port);
+                    if (task.Wait(500) && client.Connected)
+                        return true;
+                }
+            }
+            catch
+            {
+            }
+            System.Threading.Thread.Sleep(250);
+        }
+        return false;
+    }
+
+    private void StopRoom()
+    {
+        if (serverProcess != null)
+        {
+            try
+            {
+                if (!serverProcess.HasExited)
+                    serverProcess.Kill();
+            }
+            catch
+            {
+            }
+            serverProcess = null;
+        }
+        create.Text = "\u521b\u5efa\u623f\u95f4";
+        if (status.Text.StartsWith("\u5c40\u57df\u7f51\u623f\u95f4\u5df2\u521b\u5efa", StringComparison.Ordinal))
+            status.Text = "\u623f\u95f4\u5df2\u5173\u95ed";
+    }
+
     private static bool TryHost(string text, out string host)
     {
         text = text.Trim();
@@ -396,4 +538,10 @@ internal sealed class LanLauncher : Form
         }
     }
 }
+
+
+
+
+
+
 
