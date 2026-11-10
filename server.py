@@ -575,7 +575,7 @@ class Match(asyncio.DatagramProtocol):
         self.forwarded = set()
         self.open_doors = set()
         skin_offset = self.vehicle_skin_offset
-        kinds = [1 + skin_offset, 2 + skin_offset, 3]
+        kinds = [1 + skin_offset, 2, 3 + skin_offset]
         spawn_kinds = kinds + [choice(kinds) for _ in range(3)]
         shuffle(spawn_kinds)
         spots = (
@@ -1679,7 +1679,7 @@ class Match(asyncio.DatagramProtocol):
                     del self.vehicles[vehicle.id]
                     new_id = self.next_vehicle_id
                     self.next_vehicle_id += 1
-                    kind = choice([1 + self.vehicle_skin_offset, 2 + self.vehicle_skin_offset, 3])
+                    kind = choice([1 + self.vehicle_skin_offset, 2, 3 + self.vehicle_skin_offset])
                     replacement = Vehicle(new_id, kind, vehicle.x, vehicle.z, vehicle.yaw)
                     self.vehicles[new_id] = replacement
                     self.broadcast(VEHICLE_SPAWN, struct.pack("<II", replacement.id, replacement.kind) + replacement.status())
@@ -1844,6 +1844,7 @@ if __name__ == "__main__":
                           args.owner_profile, args.admin_port, args.admin_token))
     except KeyboardInterrupt:
         pass
+
 
 
 
