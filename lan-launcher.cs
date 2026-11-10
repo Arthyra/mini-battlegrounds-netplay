@@ -60,13 +60,16 @@ internal sealed class LanLauncher : Form
             if (shellType == null)
                 return;
             var shell = Activator.CreateInstance(shellType);
-            var path = Path.Combine(desktop, "Mini Battlegrounds LAN.lnk");
+            var path = Path.Combine(desktop, "Mini Battle.lnk");
             var shortcut = shellType.InvokeMember("CreateShortcut", BindingFlags.InvokeMethod, null, shell, new object[] { path });
             var type = shortcut.GetType();
             type.InvokeMember("TargetPath", BindingFlags.SetProperty, null, shortcut, new object[] { Application.ExecutablePath });
             type.InvokeMember("WorkingDirectory", BindingFlags.SetProperty, null, shortcut, new object[] { AppDomain.CurrentDomain.BaseDirectory });
             type.InvokeMember("Description", BindingFlags.SetProperty, null, shortcut, new object[] { "Mini Battlegrounds LAN" });
-            type.InvokeMember("IconLocation", BindingFlags.SetProperty, null, shortcut, new object[] { Application.ExecutablePath + ",0" });
+            var icon = Path.Combine(Client, "CrazyShooter.exe");
+            if (!File.Exists(icon))
+                icon = Application.ExecutablePath;
+            type.InvokeMember("IconLocation", BindingFlags.SetProperty, null, shortcut, new object[] { icon + ",0" });
             type.InvokeMember("Save", BindingFlags.InvokeMethod, null, shortcut, null);
         }
         catch
@@ -610,6 +613,8 @@ internal sealed class LanLauncher : Form
         }
     }
 }
+
+
 
 
 
