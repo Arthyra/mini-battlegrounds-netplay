@@ -19,6 +19,28 @@ import unicodedata
 
 BASE_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
 
+
+def profile_path(root):
+    override = os.environ.get("MBG_PROFILE_PATH")
+    if override:
+        path = Path(override)
+    else:
+        if os.name == "nt":
+            base = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local")) / "MiniBattlegroundsLAN"
+        else:
+            base = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share")) / "mini-battlegrounds-lan"
+        path = base / "lan-profiles.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.exists():
+        for candidate in (root / "lan-profiles.json", root.parent / "lan-profiles.json"):
+            if candidate.is_file() and candidate != path:
+                try:
+                    path.write_bytes(candidate.read_bytes())
+                    break
+                except OSError:
+                    pass
+    return path
+
 HOST = "127.0.0.1"
 LOGIN_PORT = 43120
 DISCOVERY_PORT = 43122
@@ -564,7 +586,7 @@ class Match(asyncio.DatagramProtocol):
         }
         self.reset_round_state()
         self.empty_since = 0.0
-        self.profile_path = root / "lan-profiles.json"
+        self.profile_path = profile_path(root)
         self.saved_profiles = json.loads(self.profile_path.read_text(encoding="utf-8")) if self.profile_path.exists() else {}
         self.skin_catalog = {
             kind: (category, item)

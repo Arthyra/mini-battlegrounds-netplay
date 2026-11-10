@@ -37,8 +37,12 @@ internal sealed class LanLauncher : Form
     private readonly string profile;
 
     [STAThread]
+    [DllImport("user32.dll")]
+    private static extern bool SetProcessDPIAware();
+
     private static void Main(string[] args)
     {
+        try { SetProcessDPIAware(); } catch { }
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
         try
@@ -416,17 +420,27 @@ internal sealed class LanLauncher : Form
         try
         {
             progress.Report(new UpdateProgress { Percent = 2, Text = "连接更新服务器…" });
-            DownloadUpdate(latest.Url, archive, progress);
-            progress.Report(new UpdateProgress { Percent = 72, Text = "校验更新包…" });
-            if (!string.IsNullOrEmpty(latest.Sha256))
+            for (var attempt = 1; ; attempt++)
             {
-                using (var sha = SHA256.Create())
-                using (var stream = File.OpenRead(archive))
+                DownloadUpdate(latest.Url, archive, progress);
+                progress.Report(new UpdateProgress { Percent = 72, Text = "校验更新包…" });
+                var valid = true;
+                if (!string.IsNullOrEmpty(latest.Sha256))
                 {
-                    var actual = BitConverter.ToString(sha.ComputeHash(stream)).Replace("-", "").ToLowerInvariant();
-                    if (actual != latest.Sha256.ToLowerInvariant())
-                        throw new InvalidDataException("更新包校验失败。");
+                    using (var sha = SHA256.Create())
+                    using (var stream = File.OpenRead(archive))
+                    {
+                        var actual = BitConverter.ToString(sha.ComputeHash(stream)).Replace("-", "").ToLowerInvariant();
+                        valid = actual == latest.Sha256.ToLowerInvariant();
+                    }
                 }
+                if (valid)
+                    break;
+                try { File.Delete(archive); } catch { }
+                if (attempt >= 3)
+                    throw new InvalidDataException("更新包校验失败，已重试 3 次。");
+                progress.Report(new UpdateProgress { Percent = 3, Text = "校验失败，正在重试…" });
+                System.Threading.Thread.Sleep(1000);
             }
             progress.Report(new UpdateProgress { Percent = 80, Text = "解压更新包…" });
             ZipFile.ExtractToDirectory(archive, staging);
@@ -865,7 +879,7 @@ internal sealed class LanLauncher : Form
         {
             try
             {
-                for (var i = 0; i < 100; i++)
+                for (var i = 0; i < 80; i++)
                 {
                     process.Refresh();
                     var handle = process.MainWindowHandle;
@@ -876,9 +890,8 @@ internal sealed class LanLauncher : Form
                         SetWindowLong(handle, -16, style);
                         var bounds = Screen.PrimaryScreen.Bounds;
                         SetWindowPos(handle, IntPtr.Zero, bounds.Left, bounds.Top, bounds.Width, bounds.Height, 0x0040 | 0x0004);
-                        return;
                     }
-                    System.Threading.Thread.Sleep(100);
+                    System.Threading.Thread.Sleep(250);
                 }
             }
             catch
@@ -905,6 +918,25 @@ internal sealed class LanLauncher : Form
                 WorkingDirectory = Client
             });
             MakeBorderless(process);
+            try
+            {
+                var helper = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "fullscreen.ps1");
+                if (File.Exists(helper))
+                {
+                    var helperBounds = Screen.PrimaryScreen.Bounds;
+                    var helperArgs = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"" + helper +
+                        "\" -ProcessId " + process.Id + " -Width " + helperBounds.Width + " -Height " + helperBounds.Height;
+                    Process.Start(new ProcessStartInfo("powershell.exe", helperArgs)
+                    {
+                        WorkingDirectory = AppDomain.CurrentDomain.BaseDirectory,
+                        UseShellExecute = false,
+                        CreateNoWindow = true
+                    });
+                }
+            }
+            catch
+            {
+            }
             return process;
         }
         catch (System.ComponentModel.Win32Exception error)
@@ -963,6 +995,11 @@ internal sealed class LanLauncher : Form
         }
     }
 }
+
+
+
+
+
 
 
 

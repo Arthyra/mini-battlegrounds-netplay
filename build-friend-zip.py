@@ -60,6 +60,9 @@ def build(output, client, host=None, version=None):
         subprocess.run([str(csc), "/nologo", "/target:winexe", "/reference:System.Windows.Forms.dll",
                         "/reference:System.Drawing.dll", f"/out:{stage / 'Updater.exe'}",
                         str(ROOT / "updater.cs"), str(updater_info)], check=True)
+        subprocess.run([str(csc), "/nologo", "/target:winexe", f"/out:{stage / 'Fullscreen.exe'}",
+                        str(ROOT / "fullscreen-helper.cs")], check=True)
+        shutil.copy2(ROOT / "fullscreen.ps1", stage / "fullscreen.ps1")
         launcher_info.unlink(missing_ok=True)
         updater_info.unlink(missing_ok=True)
         copy_runtime(stage / "client", client)
