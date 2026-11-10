@@ -690,6 +690,76 @@ internal static class PatchCombat
         effect.Previous.Previous.Operand = shooter.Operand;
     }
 
+    private static void InstallLanRoom(ModuleDefinition module, ModuleDefinition ui)
+    {
+        var room = ui.GetType("LanRoomUI");
+        var request = module.GetType("CS.GUIEntityLogin").Methods.Single(m => m.Name == "RequestLogin" &&
+            m.HasBody && m.Body.Instructions.Any(i => i.OpCode == OpCodes.Ldstr && (string)i.Operand == "127.0.0.1"));
+        var loginHost = request.Body.Instructions.Single(i => i.OpCode == OpCodes.Ldstr &&
+            (string)i.Operand == "127.0.0.1");
+        var requestIl = request.Body.GetILProcessor();
+        requestIl.InsertAfter(loginHost,
+            requestIl.Create(OpCodes.Call, module.ImportReference(Method(room, "GetLoginHost", "System.String"))));
+
+        var world = module.GetType("CS.WorldServerProxy");
+        var receive = Method(world, "OnReceive", "System.Byte[]");
+        var il = receive.Body.GetILProcessor();
+        var code = receive.Body.Instructions;
+        var message = code.Single(i => i.OpCode == OpCodes.Stloc_3).Next;
+        Before(il, message, il.Create(OpCodes.Ldloc_3), il.Create(OpCodes.Ldc_I4, 210),
+            il.Create(OpCodes.Bne_Un, message), il.Create(OpCodes.Ldloc_1),
+            il.Create(OpCodes.Call, module.ImportReference(Method(room, "Receive", "System.IO.BinaryReader"))),
+            il.Create(OpCodes.Ret));
+        var login = Method(world, "HandleLogin", "System.IO.BinaryReader");
+        il = login.Body.GetILProcessor();
+        il.InsertBefore(login.Body.Instructions[0],
+            il.Create(OpCodes.Call, module.ImportReference(Method(room, "ResetState"))));
+
+        var bar = module.GetType("CS.GUIEntityBattleBar");
+        var toggle = Method(bar, "HandleButtonBattleClicked");
+        toggle.Body = new MethodBody(toggle);
+        il = toggle.Body.GetILProcessor();
+        il.Emit(OpCodes.Ldc_I4_4);
+        il.Emit(OpCodes.Call, Method(bar, "RequestPlayerBattle", "CS.BattleMode"));
+        il.Emit(OpCodes.Ret);
+
+        var start = new MethodDefinition("RequestLanRoomStart",
+            MethodAttributes.Private | MethodAttributes.Static, module.TypeSystem.Void);
+        bar.Methods.Add(start);
+        il = start.Body.GetILProcessor();
+        var packet = module.GetType("CS.NetPacket");
+        var proxy = module.GetType("CS.ServerProxyManager");
+        var data = new VariableDefinition(packet);
+        start.Body.Variables.Add(data);
+        il.Emit(OpCodes.Newobj, Method(packet, ".ctor"));
+        il.Emit(OpCodes.Stloc, data);
+        il.Emit(OpCodes.Ldloc, data);
+        il.Emit(OpCodes.Ldc_I4, 211);
+        il.Emit(OpCodes.Callvirt, Method(packet, "Push", "System.UInt16"));
+        il.Emit(OpCodes.Ldloc, data);
+        il.Emit(OpCodes.Callvirt, Method(packet, "UpdateHeader"));
+        il.Emit(OpCodes.Call, Method(proxy, "get_Instance"));
+        il.Emit(OpCodes.Callvirt, Method(proxy, "GetWorldServerProxy"));
+        il.Emit(OpCodes.Ldloc, data);
+        il.Emit(OpCodes.Callvirt, Method(module.GetType("CS.NetBuffer"), "get_Base"));
+        il.Emit(OpCodes.Callvirt, Method(module.GetType("CS.TcpPeer"), "Send", "System.Byte[]"));
+        il.Emit(OpCodes.Ret);
+
+        var setup = Method(bar, "Initialise");
+        il = setup.Body.GetILProcessor();
+        var engine = module.AssemblyResolver.Resolve(module.AssemblyReferences.Single(a => a.Name == "UnityEngine"));
+        var action = module.ImportReference(engine.MainModule.GetType("UnityEngine.Events.UnityAction"));
+        var makeAction = new MethodReference(".ctor", module.TypeSystem.Void, action) { HasThis = true };
+        makeAction.Parameters.Add(new ParameterDefinition(module.TypeSystem.Object));
+        makeAction.Parameters.Add(new ParameterDefinition(module.TypeSystem.IntPtr));
+        Before(il, setup.Body.Instructions.Last(),
+            il.Create(OpCodes.Ldarg_0), il.Create(OpCodes.Ldfld, bar.Fields.Single(f => f.Name == "mButtonBattle")),
+            il.Create(OpCodes.Ldarg_0), il.Create(OpCodes.Ldfld, bar.Fields.Single(f => f.Name == "mButtonBattleText")),
+            il.Create(OpCodes.Ldnull), il.Create(OpCodes.Ldftn, start), il.Create(OpCodes.Newobj, makeAction),
+            il.Create(OpCodes.Call, module.ImportReference(Method(room, "Attach",
+                "UnityEngine.UI.Button", "UnityEngine.UI.Text", "UnityEngine.Events.UnityAction"))));
+    }
+
     private static void InstallProfileName(ModuleDefinition module)
     {
         const string prefix = "-lan-profile=";
@@ -859,12 +929,13 @@ internal static class PatchCombat
 
     public static void Main(string[] args)
     {
-        if (args.Length != 2)
-            throw new ArgumentException("Pass the input and output Assembly-CSharp.dll paths.");
+        if (args.Length != 3)
+            throw new ArgumentException("Pass input Assembly-CSharp.dll, output Assembly-CSharp.dll and LanRoomUI.dll.");
         using (var resolver = new DefaultAssemblyResolver())
         {
             resolver.AddSearchDirectory(Path.GetDirectoryName(Path.GetFullPath(args[0])));
             using (var module = ModuleDefinition.ReadModule(args[0], new ReaderParameters { AssemblyResolver = resolver }))
+            using (var roomUi = ModuleDefinition.ReadModule(args[2]))
             {
                 var battle = module.GetType("CS.Battle");
                 var unit = module.GetType("CS.Unit");
@@ -877,6 +948,7 @@ internal static class PatchCombat
                 InstallRoundControls(module);
                 InstallInfiniteAmmo(module);
                 InstallRespawnMode(module);
+                InstallLanRoom(module, roomUi);
                 InstallItems(module, battle, unit);
                 InstallVehiclePropImpact(module, battle);
                 InstallEliminationNotices(module, battle, unit);

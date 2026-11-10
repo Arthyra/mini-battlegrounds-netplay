@@ -1,6 +1,7 @@
 """Local prototype for the Mini Battlegrounds Steam client (build 2655148)."""
 import argparse
 import asyncio
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 import ipaddress
 import json
@@ -8,16 +9,19 @@ import math
 import re
 from pathlib import Path
 from random import choice, uniform
+from secrets import randbits
 import struct
 import time
 import unicodedata
 
 HOST = "127.0.0.1"
 LOGIN_PORT = 43120
+DISCOVERY_PORT = 43122
 WORLD_PORT = 43123
 BATTLE_PORT = 43134
 BATTLE_UDP_PORT = 43135
 BATTLE_ID = 1
+BATTLE_LOAD_TIMEOUT = 90.0
 WORLD_ID = 1
 MAP_ID = 102
 MAX_PLAYERS = 8
@@ -74,6 +78,8 @@ SCOPE_STATE = 206
 SCOPE_POSE = 207
 WHEEL_SWITCH = 208
 RESPAWN_MODE = 4
+ROOM_STATE = 210
+ROOM_START = 211
 SCOPED_BULLET = 1 << 31
 PRIMARY_SLOT = 0
 MELEE_SLOT = 2
@@ -346,6 +352,8 @@ class Player:
     id: int
     primary: Gun
     world: asyncio.StreamWriter | None = None
+    world_ticket: int = 0
+    room_ready: bool = False
     battle: asyncio.StreamWriter | None = None
     udp: tuple | None = None
     ready: bool = False
@@ -377,8 +385,16 @@ class Player:
     character: int = 1
 
     def __post_init__(self):
+        self.reset_for_round(self.primary)
+
+    def reset_for_round(self, primary):
         self.status = (2.5 * self.id, 15.2, 3, 0, 0)
-        self.reset_weapons(self.primary)
+        self.udp = None
+        self.ready = self.firing = self.scoped = False
+        self.vehicle = None
+        self.health = MAX_HEALTH
+        self.revive_at = self.protected_until = self.reload_at = 0.0
+        self.reset_weapons(primary)
 
     def reset_weapons(self, primary):
         self.primary = primary
@@ -487,12 +503,43 @@ class Match(asyncio.DatagramProtocol):
         self.host = host
         self.size = size
         self.players = {}
+        self.owner = None
+        self.battle_id = BATTLE_ID
+        self.vehicle_skin_offset = 0 if stock_vehicles else 3
+        root = Path(__file__).resolve().parent
+        self.obstacles = json.loads((root / "map102-vehicle-obstacles.json").read_text(encoding="utf-8"))
+        props_file = root / "map102-vehicle-props.json"
+        if not props_file.is_file():
+            raise SystemExit("Map 102 prop data missing. Run python export-local-data.py first.")
+        props = json.loads(props_file.read_text(encoding="utf-8"))
+        if isinstance(props, list):
+            raise SystemExit("Map 102 prop data is outdated. Run python export-local-data.py again.")
+        self.initial_movable_props = {prop_id: (health, bounds) for prop_id, health, bounds in props["movable"]}
+        self.initial_blast_doors = {prop_id: (health, bounds) for prop_id, health, bounds in props["doors"]}
+        self.blast_doorway = {
+            prop_id: min(DOOR_BOUNDS, key=lambda door: math.dist(
+                ((bounds[0] + bounds[2]) / 2, (bounds[1] + bounds[3]) / 2), DOORS[door]
+            )) for prop_id, (_, bounds) in self.initial_blast_doors.items()
+        }
+        self.reset_round_state()
+        self.profile_path = root / "lan-profiles.json"
+        self.saved_profiles = json.loads(self.profile_path.read_text(encoding="utf-8")) if self.profile_path.exists() else {}
+        self.skin_catalog = {
+            kind: (category, item)
+            for kind, category, item in json.loads((root / "skin-catalog.json").read_text(encoding="utf-8"))
+        }
+        self.skin_inventory = struct.pack("<I", len(self.skin_catalog)) + b"".join(
+            struct.pack("<I", kind) + skin_stats(kind) for kind in self.skin_catalog
+        )
+
+    def reset_round_state(self):
         self.queued = []
-        self.open_doors = set()
         self.joined = []
         self.started = False
+        self.loading_deadline = 0.0
         self.forwarded = set()
-        skin_offset = 0 if stock_vehicles else 3
+        self.open_doors = set()
+        skin_offset = self.vehicle_skin_offset
         self.vehicles = {
             vehicle.id: vehicle for vehicle in (
                 Vehicle(101, 1 + skin_offset, 1.5, -1.0),
@@ -506,30 +553,25 @@ class Match(asyncio.DatagramProtocol):
         self.loot = {}
         self.next_loot = 1000
         self.live_bullets = {}
-        root = Path(__file__).resolve().parent
-        self.obstacles = json.loads((root / "map102-vehicle-obstacles.json").read_text(encoding="utf-8"))
-        props_file = root / "map102-vehicle-props.json"
-        if not props_file.is_file():
-            raise SystemExit("Map 102 prop data missing. Run python export-local-data.py first.")
-        props = json.loads(props_file.read_text(encoding="utf-8"))
-        if isinstance(props, list):
-            raise SystemExit("Map 102 prop data is outdated. Run python export-local-data.py again.")
-        self.movable_props = {prop_id: (health, bounds) for prop_id, health, bounds in props["movable"]}
-        self.blast_doors = {prop_id: (health, bounds) for prop_id, health, bounds in props["doors"]}
-        self.blast_doorway = {
-            prop_id: min(DOOR_BOUNDS, key=lambda door: math.dist(
-                ((bounds[0] + bounds[2]) / 2, (bounds[1] + bounds[3]) / 2), DOORS[door]
-            )) for prop_id, (_, bounds) in self.blast_doors.items()
-        }
-        self.profile_path = root / "lan-profiles.json"
-        self.saved_profiles = json.loads(self.profile_path.read_text(encoding="utf-8")) if self.profile_path.exists() else {}
-        self.skin_catalog = {
-            kind: (category, item)
-            for kind, category, item in json.loads((root / "skin-catalog.json").read_text(encoding="utf-8"))
-        }
-        self.skin_inventory = struct.pack("<I", len(self.skin_catalog)) + b"".join(
-            struct.pack("<I", kind) + skin_stats(kind) for kind in self.skin_catalog
-        )
+        self.movable_props = self.initial_movable_props.copy()
+        self.blast_doors = self.initial_blast_doors.copy()
+
+    def finish_round(self, reason):
+        print(f"round {self.battle_id} ended: {reason}", flush=True)
+        for player in self.queued:
+            if player.battle is not None:
+                player.battle.close()
+                player.battle = None
+            player.udp = None
+        members = self.lobby_members()
+        self.players = {player.id: player for player in members}
+        for player in members:
+            player.room_ready = False
+        if self.owner not in members:
+            self.owner = next((p for p in members if self.is_local_peer(p.world)), None)
+        self.battle_id += 1
+        self.reset_round_state()
+        self.send_room_state()
 
     @staticmethod
     def skin_applies(player):
@@ -550,9 +592,12 @@ class Match(asyncio.DatagramProtocol):
         message, payload = await receive(reader)
         if message != 20 or len(payload) < 4:
             raise ValueError("Unexpected first login message")
-        if len(self.players) >= self.size:
-            raise ValueError("All test slots are assigned. Restart the server for a new match.")
-        player = Player(len(self.players) + 1, choice(PRIMARY_GUNS))
+        first_slot = 1 if self.is_local_peer(writer) else 2
+        slot = next((i for i in range(first_slot, self.size + 1) if i not in self.players), None)
+        if self.queued or slot is None:
+            raise ValueError("The LAN room is full or already in a match.")
+        player = Player(slot, choice(PRIMARY_GUNS))
+        player.world_ticket = randbits(32) or 1
         player.profile_name = f"slot-{player.id}"
         if len(payload) >= 6:
             size, = struct.unpack_from("<H", payload, 4)
@@ -570,8 +615,48 @@ class Match(asyncio.DatagramProtocol):
         }
         self.players[player.id] = player
         print(f"login <- 20; assigned test player {player.id}", flush=True)
-        await send(writer, 20, struct.pack("<HII", 0, player.id, player.id) + endpoint(self.host, WORLD_PORT))
+        asyncio.get_running_loop().call_later(20, self.expire_login, player)
+        await send(writer, 20, struct.pack("<HII", 0, player.id, player.world_ticket) + endpoint(self.host, WORLD_PORT))
         await reader.read()
+
+    def expire_login(self, player):
+        if self.players.get(player.id) is player and player.world is None:
+            del self.players[player.id]
+
+    def lobby_members(self):
+        return [p for p in self.players.values() if p.world is not None and not p.world.is_closing()]
+
+    def send_room_state(self):
+        members = self.lobby_members()
+        ready = sum(p.room_ready for p in members)
+        for member in members:
+            payload = struct.pack("<BBB???", ready, len(members), self.size,
+                                  member.room_ready, member is self.owner, bool(self.queued))
+            member.world.write(frame(ROOM_STATE, payload))
+
+    def is_local_peer(self, writer):
+        address = writer.get_extra_info("peername")[0]
+        return address == self.host or (address == HOST and ipaddress.IPv4Address(self.host).is_loopback)
+
+    def release_lobby_slot(self, player):
+        del self.players[player.id]
+        if self.owner is player:
+            self.owner = next((p for p in self.lobby_members()
+                               if self.is_local_peer(p.world)), None)
+        self.send_room_state()
+
+    def start_room(self, owner):
+        if owner is not self.owner or not owner.room_ready or self.queued:
+            return
+        self.queued = [p for p in self.lobby_members() if p.room_ready]
+        for player in self.queued:
+            player.reset_for_round(choice(PRIMARY_GUNS))
+        self.loading_deadline = time.monotonic() + BATTLE_LOAD_TIMEOUT
+        self.send_room_state()
+        print(f"room started by player {owner.id} with {len(self.queued)} ready player(s)", flush=True)
+        assignment = frame(32, endpoint(self.host, BATTLE_PORT) + struct.pack("<I", self.battle_id))
+        for member in self.queued:
+            member.world.write(assignment)
 
     async def world(self, reader, writer):
         message, payload = await receive(reader)
@@ -579,9 +664,19 @@ class Match(asyncio.DatagramProtocol):
             raise ValueError("Unexpected first world message")
         player_id, ticket = struct.unpack("<II", payload)
         player = self.players.get(player_id)
-        if player is None or player_id != ticket or player.world is not None:
-            raise ValueError("Unknown or duplicate test player")
+        if self.queued or player is None or player.world_ticket != ticket or player.world is not None:
+            raise ValueError("Unknown or duplicate test player, or room already started")
         player.world = writer
+        if self.owner is None and self.is_local_peer(writer):
+            self.owner = player
+        try:
+            await self.run_lobby(player, reader, writer)
+        finally:
+            player.world = None
+            if not self.queued and self.players.get(player.id) is player:
+                self.release_lobby_slot(player)
+
+    async def run_lobby(self, player, reader, writer):
         now = int(time.time())
         print(f"world <- 23; player {player.id}", flush=True)
         await send(writer, 23, struct.pack("<HHqiqq", 0, WORLD_ID, now, 0, now + 86400, now + 86400 * 30))
@@ -589,6 +684,7 @@ class Match(asyncio.DatagramProtocol):
         await send(writer, SKINS_GET, self.skin_inventory)
         await send(writer, SKIN_APPLIES_GET, self.skin_applies(player))
         await send(writer, 119)
+        self.send_room_state()
         while True:
             message, payload = await receive(reader)
             if message == 1:
@@ -613,15 +709,15 @@ class Match(asyncio.DatagramProtocol):
                         player.skins[key] = skin
                     self.save_profile(player)
                     await send(writer, SKIN_APPLY, payload)
-            elif message == 27 and payload == struct.pack("<H", RESPAWN_MODE) and player not in self.queued:
-                self.queued.append(player)
-                print(f"world <- 27; queued player {player.id} ({len(self.queued)}/{self.size})", flush=True)
-                if len(self.queued) == self.size:
-                    for member in self.queued:
-                        await send(member.world, 32, endpoint(self.host, BATTLE_PORT) + struct.pack("<I", BATTLE_ID))
+            elif message == 27 and payload == struct.pack("<H", RESPAWN_MODE) and not self.queued:
+                player.room_ready = not player.room_ready
+                self.send_room_state()
+            elif message == ROOM_START and not payload:
+                self.start_room(player)
 
     def battle_snapshot(self):
-        header = struct.pack("<fHH", 60.0, 0, self.size)
+        count = len(self.joined)
+        header = struct.pack("<fHH", 60.0, 0, count)
         units = bytearray()
         for player in self.joined:
             units.extend(struct.pack("<III", player.id, player.character, 0))
@@ -631,7 +727,7 @@ class Match(asyncio.DatagramProtocol):
             struct.pack("<HI", WORLD_ID, p.id) + p.name() + struct.pack("<IIHI", p.character, 0, 0, p.id)
             for p in self.joined
         )
-        return header + units + struct.pack("<H", self.size) + players
+        return header + units + struct.pack("<H", count) + players
 
     async def battle(self, reader, writer):
         message, payload = await receive(reader)
@@ -639,18 +735,37 @@ class Match(asyncio.DatagramProtocol):
             raise ValueError("Unexpected first battle message")
         battle_id, world_id, player_id = struct.unpack("<IHI", payload)
         player = self.players.get(player_id)
-        if (battle_id, world_id) != (BATTLE_ID, WORLD_ID) or player not in self.queued or player.battle:
+        if (battle_id, world_id) != (self.battle_id, WORLD_ID) or player not in self.queued or player in self.joined:
             raise ValueError("Unknown or duplicate battle player")
         player.battle = writer
-        print(f"battle <- 34; player {player.id}", flush=True)
-        await send(writer, 34, struct.pack("<HIIHI", 0, BATTLE_UDP_PORT, player.id, 1, MAP_ID))
         self.joined.append(player)
-        if len(self.joined) == self.size:
+        try:
+            await self.run_battle(player, reader, writer, battle_id)
+        finally:
+            if player.battle is writer:
+                player.battle = player.udp = None
+                if not self.started:
+                    self.finish_round("a player disconnected while loading")
+                else:
+                    if player.vehicle:
+                        self.unmount(player)
+                    if all(member.battle is None for member in self.joined):
+                        self.finish_round("all players left")
+
+    async def run_battle(self, player, reader, writer, battle_id):
+        print(f"battle <- 34; player {player.id}", flush=True)
+        writer.write(frame(34, struct.pack("<HIIHI", 0, BATTLE_UDP_PORT, player.id, 1, MAP_ID)))
+        if len(self.joined) == len(self.queued):
             await asyncio.sleep(0.5)
+            if self.battle_id != battle_id:
+                return
+            snapshot = frame(37, self.battle_snapshot())
             for member in self.joined:
-                await send(member.battle, 37, self.battle_snapshot())
-        while True:
+                member.battle.write(snapshot)
+        while self.battle_id == battle_id:
             message, payload = await receive(reader)
+            if self.battle_id != battle_id:
+                return
             if message == 1:
                 await send(writer, message, payload)
             elif message == 38 and payload == struct.pack("<f", 1.0) and not player.ready:
@@ -661,12 +776,13 @@ class Match(asyncio.DatagramProtocol):
                         struct.pack("<II", vehicle.id, vehicle.kind) + vehicle.status()
                         for vehicle in self.vehicles.values()
                     )
+                    initial_state = frame(39, struct.pack("<H", 0)) + frame(40) + frame(VEHICLES_SPAWN, vehicles)
+                    initial_state += b"".join(
+                        frame(SWITCH_WEAPON, struct.pack("<II", equipped.id, equipped.weapon_id(PRIMARY_SLOT)))
+                        for equipped in self.joined
+                    )
                     for member in self.joined:
-                        await send(member.battle, 39, struct.pack("<H", 0))
-                        await send(member.battle, 40)
-                        await send(member.battle, VEHICLES_SPAWN, vehicles)
-                        for equipped in self.joined:
-                            await send(member.battle, SWITCH_WEAPON, struct.pack("<II", equipped.id, equipped.weapon_id(PRIMARY_SLOT)))
+                        member.battle.write(initial_state)
                     self.started = True
             elif self.started:
                 self.battle_input(player, message, payload)
@@ -1304,13 +1420,13 @@ class Match(asyncio.DatagramProtocol):
     async def update(self):
         while True:
             await asyncio.sleep(TICK)
-            if not self.started:
-                continue
             now = time.monotonic()
+            if not self.started:
+                if self.queued and now >= self.loading_deadline:
+                    self.finish_round("loading timed out")
+                continue
             for player in self.joined:
-                if player.battle.is_closing():
-                    if player.vehicle:
-                        self.unmount(player)
+                if player.battle is None or player.battle.is_closing():
                     continue
                 if player.revive_at and now >= player.revive_at:
                     self.revive(player, now)
@@ -1360,7 +1476,8 @@ class Match(asyncio.DatagramProtocol):
             return
         size, message, battle_id, world_id, player_id, ticket = struct.unpack_from("<HHIHII", data)
         player = self.players.get(player_id)
-        if size != len(data) or (battle_id, world_id) != (BATTLE_ID, WORLD_ID) or player is None or ticket != player_id:
+        if (size != len(data) or (battle_id, world_id) != (self.battle_id, WORLD_ID)
+                or player is None or player.battle is None or ticket != player_id):
             return
         if message == 0 and size == 18 and player.udp is None:
             player.udp = addr
@@ -1397,7 +1514,19 @@ def handler(fn):
     return run
 
 
-async def main(host, size, stock_vehicles=False):
+class LanDiscovery(asyncio.DatagramProtocol):
+    def __init__(self, host):
+        self.host = host
+
+    def connection_made(self, transport):
+        self.transport = transport
+
+    def datagram_received(self, data, addr):
+        if data == b"MBG-LAN-DISCOVER-1":
+            self.transport.sendto(b"MBG-LAN-ROOM-1 " + self.host.encode("ascii"), addr)
+
+
+async def main(host, size, stock_vehicles=False, share=False):
     match = Match(host, size, stock_vehicles)
     async with (
         await asyncio.start_server(handler(match.login), host, LOGIN_PORT),
@@ -1407,22 +1536,45 @@ async def main(host, size, stock_vehicles=False):
         udp, _ = await asyncio.get_running_loop().create_datagram_endpoint(
             lambda: match, local_addr=(host, BATTLE_UDP_PORT)
         )
+        discovery = None
         try:
+            if not ipaddress.IPv4Address(host).is_loopback:
+                try:
+                    discovery, _ = await asyncio.get_running_loop().create_datagram_endpoint(
+                        lambda: LanDiscovery(host), local_addr=("0.0.0.0", DISCOVERY_PORT)
+                    )
+                except OSError as error:
+                    print(f"LAN discovery unavailable; players can enter {host} manually: {error}", flush=True)
             print(f"Listeners ready on {host} for {size} test player(s)", flush=True)
-            await match.update()
+            if share:
+                from lan_share import share_client
+            with share_client(host) if share else nullcontext():
+                await match.update()
         finally:
+            if discovery is not None:
+                discovery.close()
             udp.close()
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--players", choices=range(1, MAX_PLAYERS + 1), default=1, type=int)
-    parser.add_argument("--host", type=ipaddress.IPv4Address, default=HOST)
+    parser.add_argument("--players", choices=range(1, MAX_PLAYERS + 1), default=MAX_PLAYERS, type=int, help="room capacity")
+    parser.add_argument("--host", type=ipaddress.IPv4Address, help="private IPv4 address for the room")
+    parser.add_argument("--share-client", action="store_true", help="prepare a LAN download and open the host client")
     parser.add_argument("--stock-vehicles", action="store_true", help="Use the three stock vehicle appearances")
     args = parser.parse_args()
+    if args.host is None:
+        if args.share_client:
+            from lan_share import default_lan_host
+            try:
+                args.host = ipaddress.IPv4Address(default_lan_host())
+            except OSError:
+                parser.error("could not select a LAN address automatically; specify --host")
+        else:
+            args.host = ipaddress.IPv4Address(HOST)
     if not args.host.is_private or args.host.is_unspecified or args.host.is_link_local:
         parser.error("--host must be a loopback or private LAN IPv4 address")
     try:
-        asyncio.run(main(str(args.host), args.players, args.stock_vehicles))
+        asyncio.run(main(str(args.host), args.players, args.stock_vehicles, args.share_client))
     except KeyboardInterrupt:
         pass

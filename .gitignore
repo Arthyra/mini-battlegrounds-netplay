@@ -7,3 +7,9 @@
 !/patch-local-login.py
 !/patch-lan-combat.cs
 !/export-local-data.py
+!/lan-room-ui.cs
+!/prepare_lan_client.py
+!/lan_share.py
+!/handoff.md
+!/lan-launcher.cs
+!/build-friend-zip.py

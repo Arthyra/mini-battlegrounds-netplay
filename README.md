@@ -1,48 +1,52 @@
 # Mini Battlegrounds LAN · 地图 102
 
-面向 Mini Battlegrounds Windows Steam Build 2655148 的局域网原型。使用本地测试身份，每局可设 1 至 8 人。102 是独立的小地图，每局使用独立服务端进程。
+面向 Mini Battlegrounds Windows Steam Build 2655148 的局域网原型。使用本地测试身份，每局可设 1 至 8 人。102 是独立的小地图，大厅常驻，所有玩家离开对局后可重新准备开下一局。
 
 ## 下载和联机
 
-[下载当前源码 ZIP](https://github.com/Ash-Rise/mini-battlegrounds-lan/archive/refs/heads/main.zip)。这个 ZIP 包含服务端、补丁源码和配置工具。仓库目前为私有，下载者需要仓库访问权限。运行游戏需要另外准备对应的 Windows 游戏副本和 102 地图资源。
+[下载 Windows 玩家包](https://github.com/Ash-Rise/mini-battlegrounds-lan/releases/download/lan-player-v0.2/Mini-Battlegrounds-LAN-Windows.zip)。把整个 ZIP 解压，双击 `Start Game.exe`。玩家包已带 102 复活地图和匹配的客户端，朋友无需安装 Steam 或 Python。
 
-如果由你开房，只需要你安装 Python 并运行服务端。其他玩家在同一个局域网内，使用你准备的同版本客户端副本，解压后启动其中的 `CrazyShooter.exe`。下一节有主机配置和打包命令。
+房主开房后，启动器会搜索局域网。只找到一个房间会直接连接；搜不到时可以粘贴房主的 IPv4 或邀请链接，再点「加入房间」。可以给 `Start Game.exe` 创建桌面快捷方式。
 
-## 使用已经准备好的客户端
+仓库为私有，朋友需要仓库访问权限。[下载源码 ZIP](https://github.com/Ash-Rise/mini-battlegrounds-lan/archive/refs/heads/main.zip) 用于开发。
 
-需要 Windows、Python 3.11 或更新版本，以及本地准备好的 `client` 目录。此目录包含 102 场景和小地图，以及已经应用本地登录、保留开局装备和命中复活补丁的 Windows 客户端。
+## 局域网开房
 
-当前本地副本已导出服务端所需的数据。若替换地图或皮肤资源包，请重新导出。旧版服务器数据也需重新导出，以加入门板的破坏数据。
+需要 Windows、Python 3.11 或更新版本，以及已准备好的同版本 `client` 目录。房主在项目目录执行：
+
+```powershell
+python .\server.py --share-client
+```
+
+服务端会选择本机的局域网 IPv4、生成已配置好地址的客户端 ZIP、打开房主客户端，并在终端打印邀请链接。朋友在同一局域网内打开链接，解压后运行 `client\CrazyShooter.exe`。朋友只需要这个链接和 Windows。多网卡机器可用 `--host 192.0.2.20` 指定朋友可达的地址。
+
+- 客人在大厅点击「开始游戏」进入匹配中，再点「取消准备」可以退出队列。大厅显示已准备人数、当前房间人数和上限。
+- 房主先点击「准备」，然后点击旁边的「开始游戏」。只有开局时已准备的玩家进入 102。房间默认最多 8 人，`--players` 可以设为 1 至 8。
+- 开局前退出大厅会释放名额。对局里所有玩家返回大厅或退出后，房间自动恢复等待准备。重新准备后由房主开下一局。
+
+游戏使用 TCP 43120、43123、43134 和 UDP 43135。局域网搜索使用 UDP 43122。启用邀请链接时额外使用 TCP 43121。分享链接在房主进程运行期间有效，地址应位于可信的局域网。
+
+### 本机测试和手动配置
+
+当前副本已导出服务端所需的地图和皮肤数据。替换地图或皮肤资源包后，重新导出：
 
 ```powershell
 python -m pip install UnityPy==1.25.2 numpy
 python .\export-local-data.py
 ```
 
-之后启动服务端。日常运行只用 Python 标准库。进程会等到设定人数全部点击「开始游戏」，然后开始一场复活模式对局。换局时重启服务端和客户端。
+本机多开时，可以启动回环地址的房间，再给每个客户端指定独立档案：
 
 ```powershell
 python .\server.py --players 2
-```
-
-打开 `client\CrazyShooter.exe` 两次，大厅默认显示「复活模式」，两边都点「开始游戏」。该 102 副本可以直接启动。服务端为每个连接分配独立的本地身份，无需运行 Steam。
-
-角色和皮肤选择保存在服务端的 `lan-profiles.json`。默认按连接顺序使用 `slot-1` 至 `slot-8`。同机多开或多人轮换时，可以给各客户端固定档案名，重启时继续用同一个名字。
-
-```powershell
+# 在另一窗口运行以下两行
 Start-Process .\client\CrazyShooter.exe -WorkingDirectory .\client -ArgumentList '-lan-profile=slot-1'
 Start-Process .\client\CrazyShooter.exe -WorkingDirectory .\client -ArgumentList '-lan-profile=slot-2'
 ```
 
-跨机器时，把示例中的 IPv4 换成主机实际的局域网地址，在新目录生成指向该地址的客户端副本。把这个新目录压缩后发给同一个局域网的朋友即可。把 `--players` 设为本局实际参加的人数，所有人都点「开始游戏」后开局。
+角色和皮肤选择保存在房主的 `lan-profiles.json`。默认按登录占用的名额使用 `slot-1` 至 `slot-8`。想固定档案时，重启客户端后继续使用同一个 `-lan-profile` 名称。
 
-```powershell
-python .\prepare-lan-client.py 192.0.2.20 .\client-for-lan
-Compress-Archive -Path .\client-for-lan -DestinationPath .\mini-battlegrounds-lan-client.zip
-python .\server.py --host 192.0.2.20 --players 4
-```
-
-端口为 TCP 43120、43123、43134 和 UDP 43135。服务端仅面向可信的本机或私有局域网。玩家在准备期间掉线时，重启服务端即可重新分配名额。
+如果已经另有方式分发客户端，可用 `python .\prepare-lan-client.py 192.0.2.20 .\client-for-lan` 生成连接指定地址的副本。
 
 ## 玩法与验证
 
@@ -61,9 +65,14 @@ python .\server.py --host 192.0.2.20 --players 4
 - `server.py` 实现登录、大厅、对局和复活规则。
 - `prepare-lan-client.py` 从已准备好的 102 客户端生成局域网副本。
 - `patch-local-login.py` 是已准备 102 副本的本地登录补丁，应用时备份程序集。
-- `patch-lan-combat.cs` 是命中与复活的 Unity Mono 程序集补丁源码，构建工具使用 Mono.Cecil 0.11.6。
+- `patch-lan-combat.cs` 是命中、复活和房间消息的 Unity Mono 补丁源码，构建工具使用 Mono.Cecil 0.11.6。
+- `lan-room-ui.cs` 使用原客户端的 UnityEngine、UnityEngine.UI 和 Mono mscorlib 编译为 `LanRoomUI.dll`。构建战斗补丁时给工具传入原程序集、输出程序集和该 DLL 三个路径，再把输出程序集和 UI DLL 一同放到客户端的 Managed 目录。
+- `lan_share.py` 提供会话内的客户端打包和下载。
+- lan-launcher.cs 和 build-friend-zip.py 用于从已准备好的客户端生成 Windows 玩家 ZIP。更新两份客户端 DLL 后运行 python .\build-friend-zip.py <输出 ZIP>。
 - `export-local-data.py` 从本地 102 客户端导出车辆碰撞数据、可破坏道具和皮肤目录。
 
-本仓库提供服务端和补丁源码。客户端、APK、原版素材、从客户端导出的数据和运行日志留在本地。全新的客户端需要先从本地游戏安装和 APK 手工准备 102 场景、贴图、小地图及开局装备补丁，当前仓库的脚本以已经准备好的 102 副本为输入。
+Git 跟踪服务端和补丁源码。预装的游戏客户端通过私有 Release 提供。原始 APK、导出数据和运行日志留在本地。全新的客户端需要先从本地游戏安装和 APK 手工准备 102 场景、贴图、小地图及开局装备补丁，当前仓库的脚本以已经准备好的 102 副本为输入。
 
 Windows 客户端的 `unit` 包从 APK 的原版角色控制器移植 `Hold_Rifle_Snipe` 和 `Fire_Rifle_Snipe`。移植时把 Unity 2017 动作的 200 个索引和 21 个平移自由度缩为 Unity 5.6 的 161 和 8，只去掉额外的空项，并调整动画数据的原生分配大小。`database` 的 TextData 包含大厅的复活模式名称和说明（10990、10991）。为规避 102 人行道彩纹，Windows 场景包的 Terrain（PathID 2562）不采样 Android 烘焙光照层。
+
+开发接手、构建和联机遗留问题见 [handoff.md](handoff.md)。
