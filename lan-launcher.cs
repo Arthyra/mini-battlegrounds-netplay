@@ -64,7 +64,7 @@ internal sealed class LanLauncher : Form
         create.SetBounds(15, 130, 140, 30);
         create.Text = "创建局域网房间";
         search.SetBounds(165, 130, 110, 30);
-        search.Text = "搜索局域网";
+        search.Text = "搜索局域网房间";
         manual.SetBounds(285, 130, 160, 30);
         manual.Text = "手动地址…";
         Controls.AddRange(new Control[] { status, cloud, create, search, manual });
@@ -583,6 +583,7 @@ internal sealed class LanLauncher : Form
         }
     }
 }
+
 
 
 
