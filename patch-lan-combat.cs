@@ -936,7 +936,7 @@ internal static class PatchCombat
         substring.Parameters.Add(new ParameterDefinition(core.Int32));
         var loop = il.Create(OpCodes.Ldloc, index);
         var next = il.Create(OpCodes.Ldloc, index);
-        var fallback = il.Create(OpCodes.Ldstr, "1");
+        var fallback = il.Create(OpCodes.Ldstr, "pc-");
         il.Emit(OpCodes.Call, readArgs);
         il.Emit(OpCodes.Stloc, args);
         il.Emit(OpCodes.Ldc_I4_1);
@@ -964,6 +964,9 @@ internal static class PatchCombat
         il.Emit(OpCodes.Stloc, index);
         il.Emit(OpCodes.Br, loop);
         il.Append(fallback);
+        il.Emit(OpCodes.Call, module.ImportReference(typeof(Environment).GetProperty("MachineName").GetGetMethod()));
+        il.Emit(OpCodes.Callvirt, module.ImportReference(typeof(string).GetMethod("ToLowerInvariant")));
+        il.Emit(OpCodes.Call, module.ImportReference(typeof(string).GetMethod("Concat", new[] { typeof(string), typeof(string) })));
         il.Emit(OpCodes.Ret);
         var account = request.Body.Instructions[1];
         if (account.OpCode != OpCodes.Ldstr || (string)account.Operand != "1")
@@ -1096,6 +1099,27 @@ internal static class PatchCombat
         Before(login.Body.GetILProcessor(), ping.Next,
             login.Body.GetILProcessor().Create(OpCodes.Ldarg_0),
             login.Body.GetILProcessor().Create(OpCodes.Call, send));
+
+        // Re-sent profile 117 updates LocalPlayer, but the hall's top bar does
+        // not redraw itself. Refresh it so a rename is visible immediately.
+        var gui = module.GetType("CS.GUISystem");
+        var bar = module.GetType("CS.GUIEntitySystemBar");
+        var getEntity = new GenericInstanceMethod(gui.Methods.Single(m => m.Name == "GetEntity" &&
+            m.HasGenericParameters && m.Parameters.Count == 0));
+        getEntity.GenericArguments.Add(module.ImportReference(bar));
+        var refresh = module.ImportReference(Method(bar, "RefreshPlayer"));
+        var getPlayer = Method(world, "HandleGetPlayer", "System.IO.BinaryReader");
+        var playerIl = getPlayer.Body.GetILProcessor();
+        var setInfo = getPlayer.Body.Instructions.Single(i => i.OpCode == OpCodes.Callvirt &&
+            ((MethodReference)i.Operand).Name == "SetPlayerInfo");
+        var barValue = new VariableDefinition(module.ImportReference(bar));
+        getPlayer.Body.Variables.Add(barValue);
+        var skipRefresh = playerIl.Create(OpCodes.Nop);
+        Before(playerIl, setInfo.Next, playerIl.Create(OpCodes.Call, Method(gui, "get_Instance")),
+            playerIl.Create(OpCodes.Callvirt, getEntity), playerIl.Create(OpCodes.Stloc, barValue),
+            playerIl.Create(OpCodes.Ldloc, barValue), playerIl.Create(OpCodes.Brfalse, skipRefresh),
+            playerIl.Create(OpCodes.Ldloc, barValue), playerIl.Create(OpCodes.Callvirt, refresh),
+            skipRefresh);
     }
 
     private static void InstallVehiclePropImpact(ModuleDefinition module, TypeDefinition battle)

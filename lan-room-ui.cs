@@ -78,12 +78,8 @@ public sealed class LanRoomUI : MonoBehaviour
         status.alignment = TextAnchor.MiddleRight;
         status.raycastTarget = false;
 
-        var view = ready.gameObject.AddComponent<LanRoomUI>();
-        view.readyButton = ready;
-        view.startButton = launch;
-        view.readyLabel = label;
-        view.statusLabel = status;
-
+        // Clone the rename button before adding LanRoomUI to the ready button;
+        // otherwise the clone inherits a second component with null fields.
         var rename = Instantiate(ready);
         rename.name = "LanRename";
         rename.transform.SetParent(root, false);
@@ -92,6 +88,15 @@ public sealed class LanRoomUI : MonoBehaviour
         renameRect.pivot = new Vector2(1, 0);
         renameRect.anchoredPosition = new Vector2(-12, 150);
         renameRect.sizeDelta = new Vector2(96, 34);
+        var renameText = rename.transform.Find("Text").GetComponent<Text>();
+        renameText.text = "\u6539\u540d";
+        renameText.fontSize = 20;
+
+        var view = ready.gameObject.AddComponent<LanRoomUI>();
+        view.readyButton = ready;
+        view.startButton = launch;
+        view.readyLabel = label;
+        view.statusLabel = status;
         rename.onClick = new Button.ButtonClickedEvent();
         rename.onClick.AddListener(() =>
         {
@@ -99,9 +104,6 @@ public sealed class LanRoomUI : MonoBehaviour
             view.editName = string.Empty;
             view.renameMessage = string.Empty;
         });
-        var renameText = rename.transform.Find("Text").GetComponent<Text>();
-        renameText.text = "\u6539\u540d";
-        renameText.fontSize = 20;
         view.renameButton = rename;
 
         view.Update();
