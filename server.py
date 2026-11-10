@@ -576,14 +576,17 @@ class Match(asyncio.DatagramProtocol):
         self.open_doors = set()
         skin_offset = self.vehicle_skin_offset
         kinds = [1 + skin_offset, 2 + skin_offset, 3 + skin_offset]
-        spawn_kinds = kinds + [choice(kinds)]
+        spawn_kinds = kinds + [choice(kinds) for _ in range(3)]
         shuffle(spawn_kinds)
-        spots = ((-62.0, -8.0), (-45.0, -8.0), (12.0, -12.0), (79.0, -3.0))
+        spots = (
+            (-62.0, -8.0), (-48.0, -8.0), (-35.0, -8.0),
+            (35.0, -3.0), (48.0, -3.0), (62.0, -3.0),
+        )
         self.vehicles = {
             101 + index: Vehicle(101 + index, spawn_kinds[index], x, z)
             for index, (x, z) in enumerate(spots)
         }
-        self.next_vehicle_id = 105
+        self.next_vehicle_id = 107
         self.bullet_id = 0
         self.rockets = []
         self.grenades = []
@@ -1841,6 +1844,7 @@ if __name__ == "__main__":
                           args.owner_profile, args.admin_port, args.admin_token))
     except KeyboardInterrupt:
         pass
+
 
 
 
