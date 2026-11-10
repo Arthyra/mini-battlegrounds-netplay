@@ -107,6 +107,7 @@ MACHETE_RANGE = 5.0
 MACHETE_DAMAGE = 390.0
 MACHETE_CONE = math.cos(math.radians(75))
 EQUIP_TIME = 0.5
+SWITCH_EQUIP_TIME = 0.0
 TICK = 0.05
 MAX_HEALTH = 800.0
 DOWN_TIME = 3.0
@@ -1079,9 +1080,10 @@ class Match(asyncio.DatagramProtocol):
         if slot != player.slot and player.slot <= MELEE_SLOT:
             player.previous_slot = player.slot
         player.slot = slot
-        player.firing = False
         player.fired_during_operation = False
-        player.equip_ready_at = now + EQUIP_TIME
+        if slot < MELEE_SLOT:
+            player.guns[slot].next_shot = 0.0
+        player.equip_ready_at = now + SWITCH_EQUIP_TIME
         self.broadcast(SWITCH_WEAPON, struct.pack("<II", player.id, player.selected_id()))
 
     def cancel_item(self, player):
@@ -1823,6 +1825,8 @@ if __name__ == "__main__":
                           args.owner_profile, args.admin_port, args.admin_token))
     except KeyboardInterrupt:
         pass
+
+
 
 
 
