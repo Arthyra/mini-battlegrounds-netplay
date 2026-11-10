@@ -180,8 +180,19 @@ internal sealed class LanLauncher : Form
             status.Text = "地址无效，请输入房主 IPv4。";
             return;
         }
-        status.Text = "已启动客户端：目标 " + host + "，档案 " + profile + "。\n登录卡住时看房主服务端日志，或检查防火墙。";
+        status.Text = "正在检查 " + host + " 的登录/世界/战斗端口…";
+        foreach (var port in new[] { 43120, 43123, 43134 })
+        {
+            if (!WaitForPort(host, port, port == 43120 ? 3000 : 1800))
+            {
+                status.Text = "连不上 " + host + ":" + port + "。\n检查房主 server.exe 的 Windows 防火墙（专用网络）和是否在同一 Wi-Fi。";
+                return;
+            }
+        }
+        status.Text = "已启动客户端：目标 " + host + "，档案 " + profile + "。";
         gameProcess = StartGame(host, profile);
+        if (gameProcess == null)
+            status.Text = "启动客户端失败。检查 client\\CrazyShooter.exe 是否完整。";
     }
 
     private string ChooseRoom(System.Collections.Generic.IEnumerable<string> rooms)
@@ -569,6 +580,11 @@ internal sealed class LanLauncher : Form
             return;
         }
         var host = LanAddress();
+        if (host.Length == 0)
+        {
+            MessageBox.Show("没有找到可用的局域网 IPv4。\n请先连接同一个 Wi-Fi/手机热点，再创建房间。", "Mini Battlegrounds");
+            return;
+        }
         try
         {
             var info = new ProcessStartInfo(serverExe,
@@ -580,7 +596,6 @@ internal sealed class LanLauncher : Form
                 RedirectStandardOutput = true,
                 RedirectStandardError = true
             };
-            StopOwnServers(serverExe);
             StopOwnServers(serverExe);
             serverLogPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "launcher-server.log");
             try { File.WriteAllText(serverLogPath, ""); } catch { }
@@ -601,6 +616,7 @@ internal sealed class LanLauncher : Form
             }
             status.Text = "局域网房间已创建：" + host + "\n房主档案 slot-1；服务端日志已开启。";
             create.Text = "关闭局域网房间";
+            logButton.Enabled = true;
             gameProcess = StartGame(host, "slot-1");
         }
         catch (Exception error)
