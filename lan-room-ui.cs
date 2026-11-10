@@ -168,6 +168,9 @@ public sealed class LanRoomUI : MonoBehaviour
         view.renameButton = rename;
 
         view.Update();
+        var scoreboard = new GameObject("LanScoreboard");
+        DontDestroyOnLoad(scoreboard);
+        scoreboard.AddComponent<LanScoreboard>();
     }
 
     private void Update()
@@ -285,4 +288,5 @@ public sealed class LanRoomUI : MonoBehaviour
         }
     }
 }
+
 

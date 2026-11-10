@@ -89,6 +89,7 @@ RESPAWN_MODE = 4
 ROOM_STATE = 210
 BATTLE_END = 41
 BATTLE_CLOSE = 43
+SCOREBOARD = 216
 ROOM_START = 211
 LAST_WEAPON = 212
 NICKNAME = 213
@@ -383,6 +384,8 @@ class Player:
     reload_at: float = 0.0
     vehicle: Vehicle | None = None
     health: float = MAX_HEALTH
+    kills: int = 0
+    deaths: int = 0
     revive_at: float = 0.0
     protected_until: float = 0.0
     throwables: set[int] = field(default_factory=set)
@@ -408,6 +411,7 @@ class Player:
         self.ready = self.firing = self.scoped = False
         self.vehicle = None
         self.health = MAX_HEALTH
+        self.kills = self.deaths = 0
         self.revive_at = self.protected_until = self.reload_at = 0.0
         self.reset_weapons(primary)
 
@@ -831,6 +835,16 @@ class Match(asyncio.DatagramProtocol):
             elif message == ROOM_START and not payload:
                 self.start_room(player)
 
+    def score_text(self, final=False):
+        def clean(value):
+            return "".join(" " if ch in ",;|\n\r" else ch for ch in (value or ""))
+        rows = sorted(self.joined, key=lambda p: (-p.kills, p.deaths, p.id))
+        body = ";".join(
+            "{},{},{}".format(clean(p.nickname or "LAN Test {}".format(p.id)), p.kills, p.deaths)
+            for p in rows
+        )
+        return ("FINAL|" if final else "S|") + body
+
     def battle_snapshot(self):
         count = len(self.joined)
         header = struct.pack("<fHH", 60.0, 0, count)
@@ -878,6 +892,7 @@ class Match(asyncio.DatagramProtocol):
     async def run_battle(self, player, reader, writer, battle_id):
         print(f"battle <- 34; player {player.id}", flush=True)
         writer.write(frame(34, struct.pack("<HIIHI", 0, BATTLE_UDP_PORT, player.id, 1, MAP_ID)))
+        writer.write(frame(SCOREBOARD, self.score_text().encode("utf-8")))
         if len(self.joined) == len(self.queued):
             await asyncio.sleep(0.5)
             if self.battle_id != battle_id:
@@ -908,6 +923,7 @@ class Match(asyncio.DatagramProtocol):
                     self.round_started = time.monotonic()
                     for member in self.joined:
                         member.battle.write(initial_state)
+                    self.broadcast(SCOREBOARD, self.score_text().encode("utf-8"))
             elif self.started:
                 self.battle_input(player, message, payload)
 
@@ -1417,14 +1433,18 @@ class Match(asyncio.DatagramProtocol):
                 and not target.revive_at and now >= target.protected_until)
 
     def apply_damage(self, shooter, target, damage, now):
-        if shooter is target or damage <= 0:
+        if shooter is target or damage <= 0 or target.revive_at:
             return
         target.health = max(0.0, target.health - damage)
         print(f"hit: player {shooter.id} -> {target.id}, health {target.health:g}", flush=True)
         if not target.health:
-            self.knock_down(target, now)
+            self.knock_down(target, now, shooter)
 
-    def knock_down(self, player, now):
+    def knock_down(self, player, now, killer=None):
+        player.deaths += 1
+        if killer is not None and killer is not player and killer in self.joined:
+            killer.kills += 1
+        self.broadcast(SCOREBOARD, self.score_text().encode("utf-8"))
         self.set_scope(player, False)
         player.health = 0.0
         player.revive_at = now + DOWN_TIME
@@ -1587,6 +1607,7 @@ class Match(asyncio.DatagramProtocol):
             if self.round_started and now - self.round_started >= ROUND_TIME:
                 if not self.round_ending:
                     self.round_ending = True
+                    self.broadcast(SCOREBOARD, self.score_text(True).encode("utf-8"))
                     self.broadcast(BATTLE_END, b"")
                     print(f"round {self.battle_id} time limit; result shown", flush=True)
                 if now - self.round_started >= ROUND_TIME + ROUND_END_DELAY:
