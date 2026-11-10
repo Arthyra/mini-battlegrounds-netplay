@@ -562,6 +562,7 @@ class Match(asyncio.DatagramProtocol):
             )) for prop_id, (_, bounds) in self.initial_blast_doors.items()
         }
         self.reset_round_state()
+        self.empty_since = 0.0
         self.profile_path = root / "lan-profiles.json"
         self.saved_profiles = json.loads(self.profile_path.read_text(encoding="utf-8")) if self.profile_path.exists() else {}
         self.skin_catalog = {
@@ -582,7 +583,7 @@ class Match(asyncio.DatagramProtocol):
         self.forwarded = set()
         self.open_doors = set()
         skin_offset = self.vehicle_skin_offset
-        kinds = [1 + skin_offset, 2, 3 + skin_offset]
+        kinds = [1, 2, 3]
         spawn_kinds = kinds + [choice(kinds) for _ in range(3)]
         shuffle(spawn_kinds)
         spots = (
@@ -1042,7 +1043,7 @@ class Match(asyncio.DatagramProtocol):
             vehicle_id, seat = struct.unpack("<IH", payload)
             vehicle = self.vehicles.get(vehicle_id)
             if (vehicle and vehicle.health and seat < VEHICLE_SEATS and seat not in vehicle.occupants
-                    and math.dist((vehicle.x, vehicle.z), (player.status[0], player.status[2])) <= 6):
+                    and math.dist((vehicle.x, vehicle.z), (player.status[0], player.status[2])) <= 9):
                 vehicle.occupants[seat] = player.id
                 player.vehicle = vehicle
                 self.set_scope(player, False)
@@ -1326,7 +1327,7 @@ class Match(asyncio.DatagramProtocol):
         if loot is None:
             return
         owner, slot, position, gun, ammo, skin = loot
-        if owner == player.id or math.dist(position, player.status[:3]) > 3:
+        if math.dist(position, player.status[:3]) > 5.0:
             return
         del self.loot[loot_id]
         weapon = EquippedGun(gun, skin=skin)
@@ -1625,6 +1626,15 @@ class Match(asyncio.DatagramProtocol):
         while True:
             await asyncio.sleep(TICK)
             now = time.monotonic()
+            if self.owner_profile:
+                if not self.players:
+                    if not self.empty_since:
+                        self.empty_since = now
+                    elif now - self.empty_since >= 120.0:
+                        print("LAN room empty for 120s; shutting down", flush=True)
+                        raise SystemExit(0)
+                else:
+                    self.empty_since = 0.0
             if not self.started:
                 if self.queued and now >= self.loading_deadline:
                     self.finish_round("loading timed out")
@@ -1686,7 +1696,7 @@ class Match(asyncio.DatagramProtocol):
                     del self.vehicles[vehicle.id]
                     new_id = self.next_vehicle_id
                     self.next_vehicle_id += 1
-                    kind = choice([1 + self.vehicle_skin_offset, 2, 3 + self.vehicle_skin_offset])
+                    kind = choice([1, 2, 3])
                     replacement = Vehicle(new_id, kind, vehicle.x, vehicle.z, vehicle.yaw)
                     self.vehicles[new_id] = replacement
                     self.broadcast(VEHICLE_SPAWN, struct.pack("<II", replacement.id, replacement.kind) + replacement.status())
