@@ -4,7 +4,7 @@
 
 ## 下载和联机
 
-[下载 Windows 玩家包](https://github.com/Ash-Rise/mini-battlegrounds-lan/releases/download/lan-player-v0.9.10/Mini-Battlegrounds-LAN-Windows.zip)。把整个 ZIP 解压，双击 `Start Game.exe`。玩家包默认连接公网 ECS `198.51.100.10`，局域网时在启动器里改地址即可。包已带 102 复活地图和匹配的客户端，朋友无需安装 Steam 或 Python。
+[下载 Windows 玩家包](https://github.com/Ash-Rise/mini-battlegrounds-lan/releases/download/lan-player-v0.9.11/Mini-Battlegrounds-LAN-Windows.zip)。把整个 ZIP 解压，双击 `Start Game.exe`。玩家包默认连接公网 ECS `198.51.100.10`，局域网时在启动器里改地址即可。包已带 102 复活地图和匹配的客户端，朋友无需安装 Steam 或 Python。
 
 房主开房后，启动器会搜索局域网。只找到一个房间会直接连接；搜不到时可以粘贴房主的 IPv4，再点「加入房间」。可以给 `Start Game.exe` 创建桌面快捷方式。
 
@@ -84,6 +84,7 @@ python3 server.py --players 8 --host <公网IP> --bind 0.0.0.0
 Git 跟踪服务端和补丁源码。预装的游戏客户端通过私有 Release 提供。原始 APK、导出数据和运行日志留在本地。全新的客户端需要先从本地游戏安装和 APK 手工准备 102 场景、贴图、小地图及开局装备补丁，当前仓库的脚本以已经准备好的 102 副本为输入。
 
 Windows 客户端的 `unit` 包从 APK 的原版角色控制器移植 `Hold_Rifle_Snipe` 和 `Fire_Rifle_Snipe`。移植时把 Unity 2017 动作的 200 个索引和 21 个平移自由度缩为 Unity 5.6 的 161 和 8，只去掉额外的空项，并调整动画数据的原生分配大小。`database` 的 TextData 包含大厅的复活模式名称和说明（10990、10991）。为规避 102 人行道彩纹，Windows 场景包的 Terrain（PathID 2562）不采样 Android 烘焙光照层。
+
 
 
 
