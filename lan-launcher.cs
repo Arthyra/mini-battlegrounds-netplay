@@ -5,6 +5,7 @@ using System.Drawing;
 using System.IO;
 using System.Net;
 using System.Net.NetworkInformation;
+using System.Reflection;
 using System.Net.Sockets;
 using System.IO.Compression;
 using System.Linq;
@@ -33,6 +34,7 @@ internal sealed class LanLauncher : Form
     {
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
+        EnsureDesktopShortcut();
         if (args.Length == 2 && args[0] == "--host")
         {
             string host;
@@ -45,6 +47,31 @@ internal sealed class LanLauncher : Form
             return;
         }
         Application.Run(new LanLauncher());
+    }
+
+    private static void EnsureDesktopShortcut()
+    {
+        try
+        {
+            var desktop = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+            if (desktop.Length == 0)
+                return;
+            var shellType = Type.GetTypeFromProgID("WScript.Shell");
+            if (shellType == null)
+                return;
+            var shell = Activator.CreateInstance(shellType);
+            var path = Path.Combine(desktop, "Mini Battlegrounds LAN.lnk");
+            var shortcut = shellType.InvokeMember("CreateShortcut", BindingFlags.InvokeMethod, null, shell, new object[] { path });
+            var type = shortcut.GetType();
+            type.InvokeMember("TargetPath", BindingFlags.SetProperty, null, shortcut, new object[] { Application.ExecutablePath });
+            type.InvokeMember("WorkingDirectory", BindingFlags.SetProperty, null, shortcut, new object[] { AppDomain.CurrentDomain.BaseDirectory });
+            type.InvokeMember("Description", BindingFlags.SetProperty, null, shortcut, new object[] { "Mini Battlegrounds LAN" });
+            type.InvokeMember("IconLocation", BindingFlags.SetProperty, null, shortcut, new object[] { Application.ExecutablePath + ",0" });
+            type.InvokeMember("Save", BindingFlags.InvokeMethod, null, shortcut, null);
+        }
+        catch
+        {
+        }
     }
 
     private LanLauncher()
@@ -583,6 +610,7 @@ internal sealed class LanLauncher : Form
         }
     }
 }
+
 
 
 
