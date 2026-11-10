@@ -21,6 +21,23 @@ GUIDE = """Mini Battlegrounds LAN · 102 复活模式
 """
 
 
+def _quad(version):
+    parts = (str(version).split(".") + ["0", "0", "0", "0"])[:4]
+    return ".".join(parts)
+
+
+def _assembly_info(version, title):
+    return """using System.Reflection;
+[assembly: AssemblyTitle("%s")]
+[assembly: AssemblyProduct("Mini Battlegrounds LAN")]
+[assembly: AssemblyDescription("Mini Battlegrounds LAN")]
+[assembly: AssemblyCompany("")]
+[assembly: AssemblyVersion("%s")]
+[assembly: AssemblyFileVersion("%s")]
+[assembly: AssemblyInformationalVersion("%s")]
+""" % (title, _quad(version), _quad(version), version)
+
+
 def build(output, client, host=None, version=None):
     output = output.resolve()
     if output.suffix.lower() != ".zip" or output.exists():
@@ -32,10 +49,19 @@ def build(output, client, host=None, version=None):
     output.parent.mkdir(parents=True, exist_ok=True)
     with TemporaryDirectory(prefix="mbg-player-build-") as temporary:
         stage = Path(temporary)
+        launcher_info = stage / "LauncherAssemblyInfo.cs"
+        updater_info = stage / "UpdaterAssemblyInfo.cs"
+        launcher_info.write_text(_assembly_info(version or "0.0.0", "Mini Battlegrounds LAN"), encoding="utf-8")
+        updater_info.write_text(_assembly_info(version or "0.0.0", "Mini Battlegrounds Updater"), encoding="utf-8")
         subprocess.run([str(csc), "/nologo", "/target:winexe", "/reference:System.Windows.Forms.dll",
                         "/reference:System.Drawing.dll",
                         "/reference:System.IO.Compression.FileSystem.dll", f"/out:{stage / 'Start Game.exe'}",
-                        str(ROOT / "lan-launcher.cs")], check=True)
+                        str(ROOT / "lan-launcher.cs"), str(launcher_info)], check=True)
+        subprocess.run([str(csc), "/nologo", "/target:winexe", "/reference:System.Windows.Forms.dll",
+                        "/reference:System.Drawing.dll", f"/out:{stage / 'Updater.exe'}",
+                        str(ROOT / "updater.cs"), str(updater_info)], check=True)
+        launcher_info.unlink(missing_ok=True)
+        updater_info.unlink(missing_ok=True)
         copy_runtime(stage / "client", client)
         server_source = ROOT / "dist" / "server"
         if (server_source / "server.exe").is_file():
@@ -46,9 +72,6 @@ def build(output, client, host=None, version=None):
                 shutil.copy2(server_source / name, server_stage / name)
         if host:
             (stage / "server.txt").write_text(str(host) + "\n", encoding="ascii")
-        if version:
-            (stage / "version.txt").write_text(str(version) + "\n", encoding="ascii")
-        (stage / "README.txt").write_text(GUIDE, encoding="utf-8-sig")
         archive = Path(shutil.make_archive(str(stage.parent / stage.name) + "-client", "zip", stage))
         try:
             shutil.move(archive, output)

@@ -39,6 +39,14 @@ internal sealed class LanLauncher : Form
     {
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
+        try
+        {
+            File.Delete(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "version.txt"));
+            File.Delete(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "README.txt"));
+        }
+        catch
+        {
+        }
         EnsureDesktopShortcut();
         if (args.Length == 2 && args[0] == "--host")
         {
@@ -251,7 +259,6 @@ internal sealed class LanLauncher : Form
         public string Sha256;
     }
 
-    private static readonly string VersionFile = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "version.txt");
     private const string UpdateUrl = "http://198.51.100.10:8080/update/latest.json";
 
     private sealed class UpdateProgress
@@ -317,9 +324,10 @@ internal sealed class LanLauncher : Form
         {
             dialog.Show(this);
             var reporter = new Progress<UpdateProgress>(dialog.Report);
+            string staging = null;
             try
             {
-                await Task.Run(() => ApplyUpdate(latest, reporter));
+                await Task.Run(() => { staging = ApplyUpdate(latest, reporter); });
             }
             catch (Exception exception)
             {
@@ -329,22 +337,24 @@ internal sealed class LanLauncher : Form
             {
                 dialog.Close();
             }
+            if (error == null)
+            {
+                try
+                {
+                    StartInstaller(staging);
+                }
+                catch (Exception exception)
+                {
+                    error = exception.Message;
+                }
+            }
         }
         if (error != null)
         {
             MessageBox.Show("自动更新失败：\n" + error, "Mini Battlegrounds");
             return;
         }
-        var newLauncher = Path.Combine(AppDomain.CurrentDomain.BaseDirectory,
-            Path.GetFileNameWithoutExtension(Application.ExecutablePath) + ".new" + Path.GetExtension(Application.ExecutablePath));
-        MessageBox.Show("更新完成，正在启动新版本。", "Mini Battlegrounds");
-        if (File.Exists(newLauncher))
-            StartReplacement(newLauncher);
-        else
-            Process.Start(new ProcessStartInfo(Application.ExecutablePath)
-            {
-                WorkingDirectory = AppDomain.CurrentDomain.BaseDirectory
-            });
+        MessageBox.Show("更新程序已启动，启动器将自动重启。", "Mini Battlegrounds");
         Close();
     }
 
@@ -363,15 +373,15 @@ internal sealed class LanLauncher : Form
         }
     }
 
-    private static void ApplyUpdate(UpdateInfo latest, IProgress<UpdateProgress> progress)
+    private static string ApplyUpdate(UpdateInfo latest, IProgress<UpdateProgress> progress)
     {
         if (string.IsNullOrWhiteSpace(latest.Url))
             throw new InvalidOperationException("更新地址为空。");
-        var temporary = Path.Combine(Path.GetTempPath(), "mbg-update-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(temporary);
+        var staging = Path.Combine(Path.GetTempPath(), "mbg-update-stage-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(staging);
+        var archive = Path.Combine(staging, "update.zip");
         try
         {
-            var archive = Path.Combine(temporary, "update.zip");
             progress.Report(new UpdateProgress { Percent = 2, Text = "连接更新服务器…" });
             using (var client = new WebClient())
             {
@@ -394,52 +404,41 @@ internal sealed class LanLauncher : Form
                 }
             }
             progress.Report(new UpdateProgress { Percent = 80, Text = "解压更新包…" });
-            var extracted = Path.Combine(temporary, "extract");
-            ZipFile.ExtractToDirectory(archive, extracted);
-            var newClient = Path.Combine(extracted, "client");
-            if (!Directory.Exists(newClient))
+            ZipFile.ExtractToDirectory(archive, staging);
+            try { File.Delete(archive); } catch { }
+            if (!Directory.Exists(Path.Combine(staging, "client")))
                 throw new InvalidDataException("更新包缺少 client 目录。");
-            progress.Report(new UpdateProgress { Percent = 86, Text = "更新客户端…" });
-            CopyDirectory(newClient, Client);
-
-            var root = AppDomain.CurrentDomain.BaseDirectory;
-            var newServer = Path.Combine(extracted, "server");
-            if (Directory.Exists(newServer))
-            {
-                progress.Report(new UpdateProgress { Percent = 91, Text = "更新内置服务端…" });
-                StopOwnServers(Path.Combine(root, "server", "server.exe"));
-                CopyDirectory(newServer, Path.Combine(root, "server"));
-            }
-
-            var launcherName = Path.GetFileName(Application.ExecutablePath);
-            var newLauncherSource = Path.Combine(extracted, launcherName);
-            if (File.Exists(newLauncherSource))
-            {
-                progress.Report(new UpdateProgress { Percent = 95, Text = "准备更新启动器…" });
-                File.Copy(newLauncherSource,
-                    Path.Combine(root, Path.GetFileNameWithoutExtension(launcherName) + ".new" + Path.GetExtension(launcherName)),
-                    true);
-            }
-
-            progress.Report(new UpdateProgress { Percent = 97, Text = "更新版本信息…" });
-            foreach (var name in new[] { "README.txt", "server.txt", "version.txt" })
-            {
-                var source = Path.Combine(extracted, name);
-                if (File.Exists(source))
-                    File.Copy(source, Path.Combine(root, name), true);
-            }
-            progress.Report(new UpdateProgress { Percent = 100, Text = "更新完成" });
+            if (!File.Exists(Path.Combine(staging, "Updater.exe")))
+                throw new InvalidDataException("更新包缺少 Updater.exe。");
+            progress.Report(new UpdateProgress { Percent = 95, Text = "准备独立更新器…" });
+            return staging;
         }
-        finally
+        catch
         {
-            try
-            {
-                Directory.Delete(temporary, true);
-            }
-            catch
-            {
-            }
+            try { Directory.Delete(staging, true); } catch { }
+            throw;
         }
+    }
+
+    private static void StartInstaller(string staging)
+    {
+        if (string.IsNullOrEmpty(staging) || !Directory.Exists(staging))
+            throw new InvalidOperationException("更新暂存目录不存在。");
+        var updaterSource = Path.Combine(staging, "Updater.exe");
+        if (!File.Exists(updaterSource))
+            throw new InvalidDataException("更新包缺少 Updater.exe。");
+        var root = AppDomain.CurrentDomain.BaseDirectory;
+        StopOwnServers(Path.Combine(root, "server", "server.exe"));
+        var updater = Path.Combine(Path.GetTempPath(), "mbg-updater-" + Guid.NewGuid().ToString("N") + ".exe");
+        File.Copy(updaterSource, updater, true);
+        var launcherName = Path.GetFileName(Application.ExecutablePath);
+        var arguments = "--source \"" + staging + "\" --root \"" + root + "\" --pid " +
+            Process.GetCurrentProcess().Id + " --launch \"" + launcherName + "\"";
+        Process.Start(new ProcessStartInfo(updater, arguments)
+        {
+            WorkingDirectory = root,
+            UseShellExecute = true
+        });
     }
 
     private static void StartReplacement(string newLauncher)
@@ -490,8 +489,11 @@ internal sealed class LanLauncher : Form
     {
         try
         {
-            var text = File.ReadAllText(VersionFile).Trim();
-            return text.Length > 0 ? text : "0.0";
+            var version = FileVersionInfo.GetVersionInfo(Application.ExecutablePath).FileVersion;
+            Version parsed;
+            if (Version.TryParse(version, out parsed))
+                return parsed.ToString(3);
+            return string.IsNullOrEmpty(version) ? "0.0" : version;
         }
         catch
         {
