@@ -85,7 +85,6 @@ Git 跟踪服务端和补丁源码。预装的游戏客户端通过私有 Releas
 
 Windows 客户端的 `unit` 包从 APK 的原版角色控制器移植 `Hold_Rifle_Snipe` 和 `Fire_Rifle_Snipe`。移植时把 Unity 2017 动作的 200 个索引和 21 个平移自由度缩为 Unity 5.6 的 161 和 8，只去掉额外的空项，并调整动画数据的原生分配大小。`database` 的 TextData 包含大厅的复活模式名称和说明（10990、10991）。为规避 102 人行道彩纹，Windows 场景包的 Terrain（PathID 2562）不采样 Android 烘焙光照层。
 
-开发接手、构建和联机遗留问题见 [handoff.md](handoff.md)。
 
 
 

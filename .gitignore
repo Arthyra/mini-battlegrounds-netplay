@@ -10,10 +10,10 @@
 !/lan-room-ui.cs
 !/prepare_lan_client.py
 !/lan_share.py
-!/handoff.md
 !/lan-launcher.cs
 !/build-friend-zip.py
 !/build-release.py
 !/test-public-battle.py
 !/admin_server.py
+
 
