@@ -108,7 +108,9 @@ public sealed class LanRoomUI : MonoBehaviour
         // otherwise the clone inherits a second component with null fields.
         var rename = Instantiate(ready);
         rename.name = "LanRename";
-        rename.transform.SetParent(root, false);
+        var canvas = ready.GetComponentInParent<Canvas>();
+        rename.transform.SetParent(canvas != null ? canvas.transform : root, false);
+        rename.transform.SetAsLastSibling();
         var renameRect = (RectTransform)rename.transform;
         renameRect.anchorMin = renameRect.anchorMax = new Vector2(0, 0);
         renameRect.pivot = new Vector2(0, 0);
@@ -288,5 +290,7 @@ public sealed class LanRoomUI : MonoBehaviour
         }
     }
 }
+
+
 
 
