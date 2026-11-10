@@ -9,7 +9,7 @@ import math
 import os
 import re
 from pathlib import Path
-from random import choice, uniform
+from random import choice, shuffle, uniform
 from secrets import randbits, token_hex
 import struct
 import sys
@@ -573,12 +573,13 @@ class Match(asyncio.DatagramProtocol):
         self.forwarded = set()
         self.open_doors = set()
         skin_offset = self.vehicle_skin_offset
+        kinds = [1 + skin_offset, 2 + skin_offset, 3 + skin_offset]
+        spawn_kinds = kinds + [choice(kinds)]
+        shuffle(spawn_kinds)
+        spots = ((-62.0, -8.0), (-20.0, -12.0), (12.0, -12.0), (79.0, -3.0))
         self.vehicles = {
-            vehicle.id: vehicle for vehicle in (
-                Vehicle(101, 1 + skin_offset, 12.0, -12.0),
-                Vehicle(102, 2 + skin_offset, -62.0, -8.0),
-                Vehicle(103, 3 + skin_offset, 79.0, -3.0),
-            )
+            101 + index: Vehicle(101 + index, spawn_kinds[index], x, z)
+            for index, (x, z) in enumerate(spots)
         }
         self.bullet_id = 0
         self.rockets = []
