@@ -579,8 +579,8 @@ class Match(asyncio.DatagramProtocol):
         spawn_kinds = kinds + [choice(kinds) for _ in range(3)]
         shuffle(spawn_kinds)
         spots = (
-            (-62.0, -8.0), (-48.0, -8.0), (-35.0, -8.0),
-            (35.0, -3.0), (48.0, -3.0), (62.0, -3.0),
+            (-62.0, -8.0), (-42.0, -8.0), (-22.0, -8.0),
+            (28.0, -3.0), (42.0, -3.0), (62.0, -3.0),
         )
         self.vehicles = {
             101 + index: Vehicle(101 + index, spawn_kinds[index], x, z)
@@ -1844,6 +1844,7 @@ if __name__ == "__main__":
                           args.owner_profile, args.admin_port, args.admin_token))
     except KeyboardInterrupt:
         pass
+
 
 
 
