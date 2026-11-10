@@ -732,13 +732,7 @@ class Match(asyncio.DatagramProtocol):
         message, payload = await receive(reader)
         if message != 20 or len(payload) < 4:
             raise ValueError("Unexpected first login message")
-        first_slot = 1
-        slot = next((i for i in range(first_slot, self.size + 1) if i not in self.players), None)
-        if self.queued or slot is None:
-            raise ValueError("The LAN room is full or already in a match.")
-        player = Player(slot, choice(PRIMARY_GUNS))
-        player.world_ticket = randbits(32) or 1
-        player.profile_name = f"slot-{player.id}"
+        profile_name = ""
         if len(payload) >= 6:
             size, = struct.unpack_from("<H", payload, 4)
             name = payload[6:6 + size].decode("utf-16le", errors="replace")
@@ -746,7 +740,21 @@ class Match(asyncio.DatagramProtocol):
             if not separator or version != LAN_VERSION:
                 raise ValueError("Client version mismatch; update the LAN client.")
             if profile != "1" and re.fullmatch(r"[a-zA-Z0-9_-]{1,32}", profile):
-                player.profile_name = profile.casefold()
+                profile_name = profile.casefold()
+        preferred_slot = None
+        match = re.fullmatch(r"slot-(\d+)", profile_name)
+        if match:
+            candidate = int(match.group(1))
+            if 1 <= candidate <= self.size:
+                preferred_slot = candidate
+        first_slot = 1
+        slot = preferred_slot if preferred_slot is not None and preferred_slot not in self.players else next(
+            (i for i in range(first_slot, self.size + 1) if i not in self.players), None)
+        if self.queued or slot is None:
+            raise ValueError("The LAN room is full or already in a match.")
+        player = Player(slot, choice(PRIMARY_GUNS))
+        player.world_ticket = randbits(32) or 1
+        player.profile_name = profile_name or f"slot-{player.id}"
         duplicate = next((p for p in self.players.values() if p.profile_name == player.profile_name), None)
         if duplicate is not None:
             if self.queued or duplicate in self.joined or duplicate.battle is not None:
