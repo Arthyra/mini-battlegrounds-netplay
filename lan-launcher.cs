@@ -7,6 +7,7 @@ using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.IO.Compression;
+using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
@@ -16,16 +17,14 @@ internal sealed class LanLauncher : Form
 {
     private const int DiscoveryPort = 43122;
     private const string ReplyPrefix = "MBG-LAN-ROOM-1 ";
-    private const string OfficialHost = "198.51.100.10";
+    private const string CloudHost = "198.51.100.10";
     private static readonly string Client = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "client");
     private static readonly string Settings = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "launcher.ini");
-    private static readonly string ServerFile = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "server.txt");
-    private readonly ComboBox address = new ComboBox();
-    private readonly Button join = new Button();
+    private readonly Button cloud = new Button();
     private readonly Button search = new Button();
     private readonly Button create = new Button();
+    private readonly Button manual = new Button();
     private readonly Label status = new Label();
-    private readonly Label official = new Label();
     private Process serverProcess;
     private readonly string profile;
 
@@ -53,61 +52,54 @@ internal sealed class LanLauncher : Form
         LoadSettings(out profile);
         SaveSettings(profile);
         Text = "Mini Battlegrounds LAN";
-        ClientSize = new Size(460, 150);
+        ClientSize = new Size(460, 185);
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
 
-        status.SetBounds(15, 12, 430, 28);
-        official.SetBounds(15, 42, 430, 18);
-        official.Text = "\u516c\u5171\u670d\u52a1\u5668\uff1a" + OfficialHost;
-        address.SetBounds(15, 62, 430, 26);
-        search.SetBounds(165, 105, 110, 28);
-        search.Text = "\u641c\u7d22\u5c40\u57df\u7f51";
-        create.SetBounds(15, 105, 140, 28);
-        create.Text = "\u521b\u5efa\u5c40\u57df\u7f51\u623f\u95f4";
-        join.SetBounds(320, 105, 125, 28);
-        join.Text = "\u52a0\u5165\u623f\u95f4";
-        Controls.AddRange(new Control[] { status, official, address, create, search, join });
-        AcceptButton = join;
-        address.Items.Add(OfficialHost);
-        address.Text = OfficialHost;
-        if (File.Exists(ServerFile))
-        {
-            var configured = File.ReadAllText(ServerFile).Trim();
-            if (configured.Length > 0)
-                address.Text = configured;
-        }
-        Shown += async (sender, args) =>
-        {
-            await FindAndShow(true);
-            await CheckForUpdate();
-        };
-        search.Click += async (sender, args) => await FindAndShow(false);
-        join.Click += (sender, args) => JoinSelected();
+        status.SetBounds(15, 15, 430, 48);
+        status.Text = "加入云服务器，或创建/搜索局域网房间。";
+        cloud.SetBounds(15, 75, 430, 42);
+        cloud.Text = "加入云服务器（杭州）";
+        create.SetBounds(15, 130, 140, 30);
+        create.Text = "创建局域网房间";
+        search.SetBounds(165, 130, 110, 30);
+        search.Text = "搜索局域网";
+        manual.SetBounds(285, 130, 160, 30);
+        manual.Text = "手动地址…";
+        Controls.AddRange(new Control[] { status, cloud, create, search, manual });
+        AcceptButton = cloud;
+        Shown += async (sender, args) => await CheckForUpdate();
+        cloud.Click += (sender, args) => JoinHost(CloudHost);
+        search.Click += async (sender, args) => await SearchLan();
+        manual.Click += (sender, args) => PromptForAddress();
         create.Click += (sender, args) => ToggleRoom();
         FormClosing += (sender, args) => StopRoom();
     }
 
-    private async Task FindAndShow(bool autoJoin)
+    private async Task SearchLan()
     {
         search.Enabled = false;
-        status.Text = "\u6b63\u5728\u67e5\u627e\u5c40\u57df\u7f51\u623f\u95f4\u2026";
+        status.Text = "正在搜索局域网房间…";
         var rooms = await Task.Run(() => FindRooms());
         if (IsDisposed)
             return;
-        var manualAddress = address.Text;
-        address.Items.Clear();
-        address.Items.Add(OfficialHost);
-        foreach (var room in rooms)
-            address.Items.Add(room);
-        address.Text = manualAddress.Length > 0 ? manualAddress : OfficialHost;
         search.Enabled = true;
-        status.Text = rooms.Count > 0
-            ? "\u53d1\u73b0\u5c40\u57df\u7f51\u623f\u95f4\uff1b\u4e5f\u53ef\u76f4\u63a5\u52a0\u5165\u516c\u5171\u670d\u52a1\u5668\u3002"
-            : "\u672a\u641c\u5230\u5c40\u57df\u7f51\u623f\u95f4\u3002\u53ef\u76f4\u63a5\u52a0\u5165\u516c\u5171\u670d\u52a1\u5668\uff0c\u6216\u70b9\u300c\u521b\u5efa\u5c40\u57df\u7f51\u623f\u95f4\u300d\u3002";
-        if (autoJoin && rooms.Count == 1 && manualAddress.Length == 0)
-            JoinSelected();
+        if (rooms.Count == 0)
+        {
+            status.Text = "未发现局域网房间。可以创建房间，或手动输入房主 IP。";
+            return;
+        }
+        if (rooms.Count == 1)
+        {
+            JoinHost(rooms.First());
+            return;
+        }
+        var choice = ChooseRoom(rooms);
+        if (choice != null)
+            JoinHost(choice);
+        else
+            status.Text = "已取消选择；可重新搜索。";
     }
 
     private static SortedSet<string> FindRooms()
@@ -140,16 +132,66 @@ internal sealed class LanLauncher : Form
         return rooms;
     }
 
-    private void JoinSelected()
+    private void JoinHost(string text)
     {
         string host;
-        if (!TryHost(address.Text, out host))
+        if (!TryHost(text, out host))
         {
-            status.Text = "\u8bf7\u8f93\u5165\u623f\u4e3b\u7684 IPv4 \u5730\u5740\u6216\u9080\u8bf7\u94fe\u63a5\u3002";
+            status.Text = "地址无效，请输入房主 IPv4。";
             return;
         }
+        status.Text = "正在连接 " + host + "…";
         if (StartGame(host, profile))
             Close();
+    }
+
+    private string ChooseRoom(System.Collections.Generic.IEnumerable<string> rooms)
+    {
+        using (var dialog = new Form())
+        {
+            dialog.Text = "选择局域网房间";
+            dialog.ClientSize = new Size(330, 130);
+            dialog.FormBorderStyle = FormBorderStyle.FixedDialog;
+            dialog.StartPosition = FormStartPosition.CenterParent;
+            dialog.MaximizeBox = false;
+            dialog.MinimizeBox = false;
+            var label = new Label { Text = "发现多个房间，请选择：", Bounds = new Rectangle(15, 12, 300, 22) };
+            var list = new ComboBox { Bounds = new Rectangle(15, 40, 300, 26), DropDownStyle = ComboBoxStyle.DropDownList };
+            foreach (var room in rooms)
+                list.Items.Add(room);
+            if (list.Items.Count > 0)
+                list.SelectedIndex = 0;
+            var ok = new Button { Text = "加入", Bounds = new Rectangle(145, 85, 80, 28), DialogResult = DialogResult.OK };
+            var cancel = new Button { Text = "取消", Bounds = new Rectangle(235, 85, 80, 28), DialogResult = DialogResult.Cancel };
+            dialog.Controls.AddRange(new Control[] { label, list, ok, cancel });
+            dialog.AcceptButton = ok;
+            dialog.CancelButton = cancel;
+            return dialog.ShowDialog(this) == DialogResult.OK && list.SelectedItem != null
+                ? list.SelectedItem.ToString()
+                : null;
+        }
+    }
+
+    private void PromptForAddress()
+    {
+        using (var dialog = new Form())
+        {
+            dialog.Text = "手动输入房主地址";
+            dialog.ClientSize = new Size(340, 120);
+            dialog.FormBorderStyle = FormBorderStyle.FixedDialog;
+            dialog.StartPosition = FormStartPosition.CenterParent;
+            dialog.MaximizeBox = false;
+            dialog.MinimizeBox = false;
+            var label = new Label { Text = "房主 IPv4：", Bounds = new Rectangle(15, 18, 300, 20) };
+            var input = new TextBox { Bounds = new Rectangle(15, 42, 310, 24) };
+            var ok = new Button { Text = "连接", Bounds = new Rectangle(155, 80, 80, 28), DialogResult = DialogResult.OK };
+            var cancel = new Button { Text = "取消", Bounds = new Rectangle(245, 80, 80, 28), DialogResult = DialogResult.Cancel };
+            dialog.Controls.AddRange(new Control[] { label, input, ok, cancel });
+            dialog.AcceptButton = ok;
+            dialog.CancelButton = cancel;
+            if (dialog.ShowDialog(this) == DialogResult.OK)
+                JoinHost(input.Text);
+        }
     }
 
     private sealed class UpdateInfo
@@ -394,9 +436,8 @@ internal sealed class LanLauncher : Form
                 MessageBox.Show("服务端没有在 12 秒内启动。请检查防火墙或服务端文件。", "Mini Battlegrounds");
                 return;
             }
-            address.Text = host;
             status.Text = "局域网房间已创建：" + host;
-            create.Text = "关闭房间";
+            create.Text = "关闭局域网房间";
             Process.Start(new ProcessStartInfo(Path.Combine(Client, "CrazyShooter.exe"),
                 "-screen-fullscreen 0 -lan-host=" + host + " -lan-profile=slot-1")
             {
@@ -446,7 +487,7 @@ internal sealed class LanLauncher : Form
             }
             serverProcess = null;
         }
-        create.Text = "\u521b\u5efa\u623f\u95f4";
+        create.Text = "\u521b\u5efa\u5c40\u57df\u7f51\u623f\u95f4";
         if (status.Text.StartsWith("\u5c40\u57df\u7f51\u623f\u95f4\u5df2\u521b\u5efa", StringComparison.Ordinal))
             status.Text = "\u623f\u95f4\u5df2\u5173\u95ed";
     }
@@ -542,6 +583,8 @@ internal sealed class LanLauncher : Form
         }
     }
 }
+
+
 
 
 
