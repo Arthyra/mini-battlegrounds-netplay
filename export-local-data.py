@@ -1,5 +1,6 @@
 """Extract private runtime data from the local prepared client."""
 import json
+import struct
 from functools import lru_cache
 from pathlib import Path
 
@@ -10,15 +11,30 @@ root = Path(__file__).resolve().parent
 scene = UnityPy.load(str(root / "client/Data/cs_scene_102"))
 level = next(f for name,f in scene.cabs.items() if name=="buildplayer-cs_scene_102")
 transforms = {}
-door_objects = set()
+door_objects = {}
+shelter_objects = set()
+obstacle_ids = {}
+movable_groups = {}
 for obj in level.objects.values():
     if obj.type.name == "Transform":
         transform = obj.read()
         transforms[transform.m_GameObject.m_PathID] = obj
     if obj.type.name == "MonoBehaviour":
-        script = obj.read().m_Script.deref().read()
-        if script.m_ClassName == "DoorMarker":
-            door_objects.add(obj.read().m_GameObject.m_PathID)
+        marker = obj.read()
+        script = marker.m_Script.deref().read().m_ClassName
+        path_id = marker.m_GameObject.m_PathID
+        if script == "DoorMarker":
+            door_objects[path_id] = struct.unpack_from('<f', obj.get_raw_data(), 52)[0]
+        elif script == "ShelterMarker":
+            shelter_objects.add(path_id)
+        elif script == "ObstacleMarker":
+            obstacle_ids[path_id] = struct.unpack_from("<I", obj.get_raw_data(), 32)[0]
+        elif script == "ObstacleGroupMarker":
+            # Native DestroyableMarker fields: ID, visual reference, flags, health.
+            _, flags, health = struct.unpack_from("<I12xIf", obj.get_raw_data(), 32)
+            name = marker.m_GameObject.deref().peek_name()
+            if flags & 1 and health > 0 and name.startswith("CS_Props_Bike_"):
+                movable_groups[path_id] = health
 
 def vec(value):
     return np.array([value.x, value.y, value.z])
@@ -38,13 +54,21 @@ def world(path_id):
     return world(tr.m_Father.m_PathID) @ mat if tr.m_Father else mat
 
 boxes = []
+props = []
+doors = []
+
 for obj in level.objects.values():
     if obj.type.name != "BoxCollider":
         continue
     box = obj.read()
-    if not box.m_Enabled or box.m_IsTrigger or box.m_GameObject.m_PathID in door_objects:
+    if not box.m_Enabled or box.m_IsTrigger:
         continue
-    mat = world(transforms[box.m_GameObject.m_PathID].path_id)
+    transform = transforms[box.m_GameObject.m_PathID]
+    parent = transform.read().m_Father
+    parent_id = parent.deref().read().m_GameObject.m_PathID if parent else None
+    if parent_id in shelter_objects:
+        continue
+    mat = world(transform.path_id)
     center = mat @ np.r_[vec(box.m_Center),1]
     extent = abs(mat[:3,:3]) @ (vec(box.m_Size) / 2)
     low, high = center[:3]-extent, center[:3]+extent
@@ -53,11 +77,20 @@ for obj in level.objects.values():
     name=box.m_GameObject.deref().read().m_Name
     if name == "Scene_Size":
         continue
-    boxes.append((name,[round(float(value),3) for value in (low[0],low[2],high[0],high[2])]))
+    bounds = [round(float(value), 3) for value in (low[0], low[2], high[0], high[2])]
+    if box.m_GameObject.m_PathID in door_objects:
+        door_id = box.m_GameObject.m_PathID
+        doors.append((obstacle_ids[door_id], door_objects[door_id], bounds))
+    elif parent_id in movable_groups:
+        props.append((obstacle_ids[box.m_GameObject.m_PathID], movable_groups[parent_id], bounds))
+    else:
+        boxes.append((name, bounds))
 (root / "map102-vehicle-obstacles.json").write_text(
     "[\n" + ",\n".join("  " + json.dumps(bounds) for _, bounds in boxes) + "\n]\n",
     encoding="utf-8",
 )
+
+(root / "map102-vehicle-props.json").write_text(json.dumps({"movable": props, "doors": doors}) + "\n", encoding="utf-8")
 
 database = UnityPy.load(str(root / "client/Data/database"))
 skin_text = next(
@@ -71,4 +104,4 @@ for line in skin_text.splitlines():
         skins.append([int(fields[0]), int(fields[3]), int(fields[4])])
 assert len({kind for kind, _, _ in skins}) == len(skins)
 (root / "skin-catalog.json").write_text(json.dumps(skins) + "\n", encoding="utf-8")
-print(f"Exported {len(boxes)} obstacle boxes and {len(skins)} skin definitions.")
+print(f"Exported {len(boxes)} obstacle boxes, {len(props)} movable props and {len(skins)} skin definitions.")
