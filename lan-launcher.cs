@@ -16,6 +16,7 @@ internal sealed class LanLauncher : Form
 {
     private const int DiscoveryPort = 43122;
     private const string ReplyPrefix = "MBG-LAN-ROOM-1 ";
+    private const string OfficialHost = "198.51.100.10";
     private static readonly string Client = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "client");
     private static readonly string Settings = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "launcher.ini");
     private static readonly string ServerFile = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "server.txt");
@@ -24,6 +25,7 @@ internal sealed class LanLauncher : Form
     private readonly Button search = new Button();
     private readonly Button create = new Button();
     private readonly Label status = new Label();
+    private readonly Label official = new Label();
     private Process serverProcess;
     private readonly string profile;
 
@@ -56,16 +58,20 @@ internal sealed class LanLauncher : Form
         MaximizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
 
-        status.SetBounds(15, 15, 430, 40);
-        address.SetBounds(15, 60, 430, 26);
-        search.SetBounds(135, 103, 110, 28);
+        status.SetBounds(15, 12, 430, 28);
+        official.SetBounds(15, 42, 430, 18);
+        official.Text = "\u516c\u5171\u670d\u52a1\u5668\uff1a" + OfficialHost;
+        address.SetBounds(15, 62, 430, 26);
+        search.SetBounds(165, 105, 110, 28);
         search.Text = "\u641c\u7d22\u5c40\u57df\u7f51";
-        create.SetBounds(15, 103, 110, 28);
-        create.Text = "\u521b\u5efa\u623f\u95f4";
-        join.SetBounds(320, 103, 125, 28);
+        create.SetBounds(15, 105, 140, 28);
+        create.Text = "\u521b\u5efa\u5c40\u57df\u7f51\u623f\u95f4";
+        join.SetBounds(320, 105, 125, 28);
         join.Text = "\u52a0\u5165\u623f\u95f4";
-        Controls.AddRange(new Control[] { status, address, create, search, join });
+        Controls.AddRange(new Control[] { status, official, address, create, search, join });
         AcceptButton = join;
+        address.Items.Add(OfficialHost);
+        address.Text = OfficialHost;
         if (File.Exists(ServerFile))
         {
             var configured = File.ReadAllText(ServerFile).Trim();
@@ -92,16 +98,14 @@ internal sealed class LanLauncher : Form
             return;
         var manualAddress = address.Text;
         address.Items.Clear();
+        address.Items.Add(OfficialHost);
         foreach (var room in rooms)
             address.Items.Add(room);
-        if (manualAddress.Length > 0)
-            address.Text = manualAddress;
-        else if (rooms.Count > 0)
-            address.SelectedIndex = 0;
+        address.Text = manualAddress.Length > 0 ? manualAddress : OfficialHost;
         search.Enabled = true;
         status.Text = rooms.Count > 0
-            ? "\u9009\u62e9\u623f\u95f4\uff0c\u6216\u7c98\u8d34\u623f\u4e3b IP / \u9080\u8bf7\u94fe\u63a5\u3002"
-            : "\u672a\u641c\u5230\u623f\u95f4\u3002\u8bf7\u8f93\u5165\u623f\u4e3b IP \u6216\u7c98\u8d34\u9080\u8bf7\u94fe\u63a5\u3002";
+            ? "\u53d1\u73b0\u5c40\u57df\u7f51\u623f\u95f4\uff1b\u4e5f\u53ef\u76f4\u63a5\u52a0\u5165\u516c\u5171\u670d\u52a1\u5668\u3002"
+            : "\u672a\u641c\u5230\u5c40\u57df\u7f51\u623f\u95f4\u3002\u53ef\u76f4\u63a5\u52a0\u5165\u516c\u5171\u670d\u52a1\u5668\uff0c\u6216\u70b9\u300c\u521b\u5efa\u5c40\u57df\u7f51\u623f\u95f4\u300d\u3002";
         if (autoJoin && rooms.Count == 1 && manualAddress.Length == 0)
             JoinSelected();
     }
