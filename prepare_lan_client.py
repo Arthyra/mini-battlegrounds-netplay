@@ -67,10 +67,14 @@ def main():
     parser.add_argument("host", type=ipaddress.IPv4Address)
     parser.add_argument("destination", type=Path)
     args = parser.parse_args()
-    if not args.host.is_private or args.host.is_unspecified or args.host.is_link_local:
-        parser.error("host must be a loopback or private LAN IPv4 address")
+    if args.host.is_unspecified or args.host.is_link_local:
+        parser.error("host must be a usable IPv4 address")
     try:
         prepare(args.destination, args.host)
     except (OSError, ValueError) as error:
         parser.exit(1, f"{error}\n")
     print(f"Prepared {args.destination.resolve()} -> {args.host}:{LOGIN_PORT}")
+
+
+if __name__ == "__main__":
+    main()

@@ -77,6 +77,15 @@ $csc = "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
 - ECS 公网最省工的路线是让 Python 服务端直接跑在 ECS，朋友免装 VPN。启动器已能接受手工输入的公网 IPv4。服务端仍限制私有地址，且绑定地址和下发地址共用 `--host`。ECS 直连需要拆开这两个地址，并为远程房主提供房主 IP 或简单凭据。旧的 `prepare-lan-client.py` 命令仍只接受私有 IPv4。先沿用现有 TCP/UDP，熟人 IP 固定时通过 ECS 安全组放行，IP 常变再做房间码。当前 UDP 票据仍等于玩家 ID，普通命中相信射手客户端，适用于受信任的玩家。别把 Windows 自动下载/启动工具直接当成 Linux ECS 的启动方式。
 - 若只想让所有人退出后能再开局，常驻一个轻量大厅和下载服务、按局清理战斗是当前实现。让进程无人自动退出也可行，但再由客户端启动需要独立的启动器或常驻控制端，还要恢复监听和下载链接。对目前单房间用途没有必要。
 
+## 2026-11-10 公网 ECS 现状
+
+- ECS `198.51.100.10`（`cn-hangzhou`，实例 `<ECS_INSTANCE_ID>`），服务端目录 `/srv/example/mbg-2`。
+- 启动方式：`python3 -u server.py --players 8 --host 198.51.100.10 --bind 0.0.0.0`。`--host` 只用于下发给客户端的公网地址，`--bind 0.0.0.0` 负责监听；两者已拆开。
+- ECS 上提供 `ecs-start.sh` / `ecs-stop.sh`，PID 写 `server.pid`，日志 `server.log`。安全组 `<ECS_INSTANCE_ID>` 已放行 TCP `43120/43123/43134` 和 UDP `43135` 到 `0.0.0.0/0`。
+- 房主现在由第一个登录大厅的玩家取得，不再依赖服务端所在电脑的连接。远程局要让房主先连入大厅，再准备和开局；其余玩家随后连接。`--host` 也允许公网地址，`prepare-lan-client.py` 不再限制私有 IPv4。
+- 公网客户端 ZIP 是本地文件，放在 `map102-test/_local-archive/`，不要提交 Git 或挂到代码仓库；朋友通过网盘等私下分发。公网服务端没有鉴权，UDP 票据仍等于玩家 ID，只适合熟人。
+- 尚未实测：两台不同网络电脑的完整战斗链路（TCP 43134 和 UDP 43135 转发）、断线重连、ECS 重启后的自动拉起。当前只验证了公网登录/大厅的客户端连接。
+
 ## 生成朋友用的 ZIP
 
 运行 `python .\build-friend-zip.py <输出 ZIP>`，或加 `--client <已准备好的副本目录>`。打包源的 `Assembly-CSharp.dll` 和 `LanRoomUI.dll` 都须支持 `-lan-host`。

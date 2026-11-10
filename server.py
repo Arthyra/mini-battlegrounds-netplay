@@ -582,7 +582,7 @@ class Match(asyncio.DatagramProtocol):
         for player in members:
             player.room_ready = False
         if self.owner not in members:
-            self.owner = next((p for p in members if self.is_local_peer(p.world)), None)
+            self.owner = members[0] if members else None
         self.battle_id += 1
         self.reset_round_state()
         self.send_room_state()
@@ -607,7 +607,7 @@ class Match(asyncio.DatagramProtocol):
         message, payload = await receive(reader)
         if message != 20 or len(payload) < 4:
             raise ValueError("Unexpected first login message")
-        first_slot = 1 if self.is_local_peer(writer) else 2
+        first_slot = 1
         slot = next((i for i in range(first_slot, self.size + 1) if i not in self.players), None)
         if self.queued or slot is None:
             raise ValueError("The LAN room is full or already in a match.")
@@ -657,8 +657,7 @@ class Match(asyncio.DatagramProtocol):
     def release_lobby_slot(self, player):
         del self.players[player.id]
         if self.owner is player:
-            self.owner = next((p for p in self.lobby_members()
-                               if self.is_local_peer(p.world)), None)
+            self.owner = next(iter(self.lobby_members()), None)
         self.send_room_state()
 
     def start_room(self, owner):
@@ -683,7 +682,7 @@ class Match(asyncio.DatagramProtocol):
         if self.queued or player is None or player.world_ticket != ticket or player.world is not None:
             raise ValueError("Unknown or duplicate test player, or room already started")
         player.world = writer
-        if self.owner is None and self.is_local_peer(writer):
+        if self.owner is None:
             self.owner = player
         try:
             await self.run_lobby(player, reader, writer)
@@ -1585,26 +1584,26 @@ class LanDiscovery(asyncio.DatagramProtocol):
             self.transport.sendto(b"MBG-LAN-ROOM-1 " + self.host.encode("ascii"), addr)
 
 
-async def main(host, size, stock_vehicles=False, share=False):
+async def main(host, bind, size, stock_vehicles=False, share=False):
     match = Match(host, size, stock_vehicles)
     async with (
-        await asyncio.start_server(handler(match.login), host, LOGIN_PORT),
-        await asyncio.start_server(handler(match.world), host, WORLD_PORT),
-        await asyncio.start_server(handler(match.battle), host, BATTLE_PORT),
+        await asyncio.start_server(handler(match.login), bind, LOGIN_PORT),
+        await asyncio.start_server(handler(match.world), bind, WORLD_PORT),
+        await asyncio.start_server(handler(match.battle), bind, BATTLE_PORT),
     ):
         udp, _ = await asyncio.get_running_loop().create_datagram_endpoint(
-            lambda: match, local_addr=(host, BATTLE_UDP_PORT)
+            lambda: match, local_addr=(bind, BATTLE_UDP_PORT)
         )
         discovery = None
         try:
-            if not ipaddress.IPv4Address(host).is_loopback:
+            if bind != "0.0.0.0" and not ipaddress.IPv4Address(bind).is_loopback:
                 try:
                     discovery, _ = await asyncio.get_running_loop().create_datagram_endpoint(
                         lambda: LanDiscovery(host), local_addr=("0.0.0.0", DISCOVERY_PORT)
                     )
                 except OSError as error:
                     print(f"LAN discovery unavailable; players can enter {host} manually: {error}", flush=True)
-            print(f"Listeners ready on {host} for {size} test player(s)", flush=True)
+            print(f"Listeners ready on {bind} -> {host} for {size} test player(s)", flush=True)
             if share:
                 from lan_share import share_client
             with share_client(host) if share else nullcontext():
@@ -1618,7 +1617,8 @@ async def main(host, size, stock_vehicles=False, share=False):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--players", choices=range(1, MAX_PLAYERS + 1), default=MAX_PLAYERS, type=int, help="room capacity")
-    parser.add_argument("--host", type=ipaddress.IPv4Address, help="private IPv4 address for the room")
+    parser.add_argument("--host", type=ipaddress.IPv4Address, help="IPv4 address advertised to players (LAN or public)")
+    parser.add_argument("--bind", type=ipaddress.IPv4Address, help="local IPv4 to bind (default: --host, or 0.0.0.0 for a public host)")
     parser.add_argument("--share-client", action="store_true", help="prepare a LAN download and open the host client")
     parser.add_argument("--stock-vehicles", action="store_true", help="Use the three stock vehicle appearances")
     args = parser.parse_args()
@@ -1631,9 +1631,15 @@ if __name__ == "__main__":
                 parser.error("could not select a LAN address automatically; specify --host")
         else:
             args.host = ipaddress.IPv4Address(HOST)
-    if not args.host.is_private or args.host.is_unspecified or args.host.is_link_local:
-        parser.error("--host must be a loopback or private LAN IPv4 address")
+    if args.host.is_unspecified or args.host.is_link_local:
+        parser.error("--host must be a usable IPv4 address")
+    if args.bind is None:
+        args.bind = ipaddress.IPv4Address("0.0.0.0") if not (args.host.is_private or args.host.is_loopback) else args.host
+    if args.bind.is_multicast or args.bind.is_link_local:
+        parser.error("--bind must be a local IPv4 address or 0.0.0.0")
+    if args.share_client and not (args.host.is_private or args.host.is_loopback):
+        parser.error("--share-client is for LAN hosts; use a public client prepared separately")
     try:
-        asyncio.run(main(str(args.host), args.players, args.stock_vehicles, args.share_client))
+        asyncio.run(main(str(args.host), str(args.bind), args.players, args.stock_vehicles, args.share_client))
     except KeyboardInterrupt:
         pass
