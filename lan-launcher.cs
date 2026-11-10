@@ -102,7 +102,7 @@ internal sealed class LanLauncher : Form
         StartPosition = FormStartPosition.CenterScreen;
 
         status.SetBounds(15, 15, 450, 64);
-        status.Text = "加入云服务器，或创建/搜索局域网房间。";
+        status.Text = "版本 v" + LocalVersion() + "\n加入云服务器，或创建/搜索局域网房间。";
         cloud.SetBounds(15, 85, 450, 40);
         cloud.Text = "加入云服务器（杭州）";
         create.SetBounds(15, 140, 140, 30);
@@ -855,7 +855,9 @@ internal sealed class LanLauncher : Form
             MessageBox.Show("\u8bf7\u5148\u5c06 ZIP \u5168\u90e8\u89e3\u538b\uff0c\u4fdd\u7559 client \u76ee\u5f55\u3002", "Mini Battlegrounds");
             return null;
         }
-        var arguments = "-force-d3d9 -screen-fullscreen 1 -lan-host=" + host + " -lan-profile=" + profile;
+        var bounds = Screen.PrimaryScreen.Bounds;
+        var arguments = "-popupwindow -screen-width " + bounds.Width + " -screen-height " + bounds.Height +
+            " -screen-fullscreen 0 -lan-host=" + host + " -lan-profile=" + profile;
         try
         {
             return Process.Start(new ProcessStartInfo(executable, arguments)
