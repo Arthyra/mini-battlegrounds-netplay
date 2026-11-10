@@ -1141,9 +1141,14 @@ class Match(asyncio.DatagramProtocol):
         angle = math.radians(yaw)
         dx, dz = math.sin(angle), math.cos(angle)
         distance = self.clear_distance(x, z, dx, dz, max(2.0, min(25.0, aim)), self.obstacles)
-        impact = (x + dx * distance, y + .2, z + dz * distance)
+        # The client applies this velocity to a Rigidbody for 1.5 seconds before
+        # THROWABLE_EXPLODE. The old packet used distance directly as speed, so
+        # the visible grenade flew about 1.5x farther than the server explosion.
+        speed = distance / 1.5
+        impact_y = max(15.0, y + 1.5 + 4.0 * 1.5 - 0.5 * 9.81 * 1.5 * 1.5)
+        impact = (x + dx * distance, impact_y, z + dz * distance)
         self.broadcast(THROW, struct.pack("<II13f", player.id, projectile, x, y + 1.5, z,
-                                          dx * distance, 4, dz * distance, 1, 0, 0, 0, 2, 2, 0))
+                                          dx * speed, 4, dz * speed, 1, 0, 0, 0, 2, 2, 0))
         self.grenades.append((now + 1.5, now + 11.5, False, player, projectile, kind, impact))
         print(f"throw: player {player.id}, kind {kind}", flush=True)
 

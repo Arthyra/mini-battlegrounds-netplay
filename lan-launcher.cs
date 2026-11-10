@@ -6,6 +6,7 @@ using System.IO;
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Net.Sockets;
 using System.IO.Compression;
 using System.Linq;
@@ -847,6 +848,45 @@ internal sealed class LanLauncher : Form
         return false;
     }
 
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetWindowLong(IntPtr hWnd, int index);
+
+    [DllImport("user32.dll")]
+    private static extern int SetWindowLong(IntPtr hWnd, int index, int value);
+
+    [DllImport("user32.dll")]
+    private static extern bool SetWindowPos(IntPtr hWnd, IntPtr after, int x, int y, int width, int height, uint flags);
+
+    private static void MakeBorderless(Process process)
+    {
+        if (process == null)
+            return;
+        System.Threading.Tasks.Task.Run(() =>
+        {
+            try
+            {
+                for (var i = 0; i < 100; i++)
+                {
+                    process.Refresh();
+                    var handle = process.MainWindowHandle;
+                    if (handle != IntPtr.Zero)
+                    {
+                        var style = (int)GetWindowLong(handle, -16);
+                        style &= ~(0x00C00000 | 0x00040000); // caption + thick frame
+                        SetWindowLong(handle, -16, style);
+                        var bounds = Screen.PrimaryScreen.Bounds;
+                        SetWindowPos(handle, IntPtr.Zero, bounds.Left, bounds.Top, bounds.Width, bounds.Height, 0x0040 | 0x0004);
+                        return;
+                    }
+                    System.Threading.Thread.Sleep(100);
+                }
+            }
+            catch
+            {
+            }
+        });
+    }
+
     private static Process StartGame(string host, string profile)
     {
         var executable = Path.Combine(Client, "CrazyShooter.exe");
@@ -860,10 +900,12 @@ internal sealed class LanLauncher : Form
             " -screen-fullscreen 0 -lan-host=" + host + " -lan-profile=" + profile;
         try
         {
-            return Process.Start(new ProcessStartInfo(executable, arguments)
+            var process = Process.Start(new ProcessStartInfo(executable, arguments)
             {
                 WorkingDirectory = Client
             });
+            MakeBorderless(process);
+            return process;
         }
         catch (System.ComponentModel.Win32Exception error)
         {
