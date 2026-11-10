@@ -81,7 +81,12 @@ public sealed class LanRoomUI : MonoBehaviour
         launchRect.anchoredPosition = ((RectTransform)ready.transform).anchoredPosition + new Vector2(-320, 0);
         launch.onClick = new Button.ButtonClickedEvent();
         launch.onClick.AddListener(start);
-        launch.transform.Find("Text").GetComponent<Text>().text = "\u5f00\u59cb\u6e38\u620f";
+        var launchText = launch.transform.Find("Text").GetComponent<Text>();
+        launchText.text = "\u5f00\u59cb\u6e38\u620f";
+        launchText.font = label.font;
+        launchText.fontSize = 20;
+        launchText.color = label.color;
+        launchText.enabled = true;
         launch.gameObject.SetActive(false);
 
         var status = Instantiate(label);
@@ -109,9 +114,28 @@ public sealed class LanRoomUI : MonoBehaviour
         renameRect.pivot = new Vector2(1, 0);
         renameRect.anchoredPosition = new Vector2(-12, 150);
         renameRect.sizeDelta = new Vector2(96, 34);
-        var renameText = rename.transform.Find("Text").GetComponent<Text>();
-        renameText.text = "\u6539\u540d";
-        renameText.fontSize = 20;
+        var oldRenameText = rename.transform.Find("Text");
+        if (oldRenameText != null)
+        {
+            var old = oldRenameText.GetComponent<Text>();
+            if (old != null)
+                old.text = "";
+        }
+        var renameLabel = Instantiate(label);
+        renameLabel.name = "RenameText";
+        renameLabel.transform.SetParent(rename.transform, false);
+        var renameLabelRect = renameLabel.rectTransform;
+        renameLabelRect.anchorMin = Vector2.zero;
+        renameLabelRect.anchorMax = Vector2.one;
+        renameLabelRect.offsetMin = Vector2.zero;
+        renameLabelRect.offsetMax = Vector2.zero;
+        renameLabel.text = "\u6539\u540d";
+        renameLabel.font = label.font;
+        renameLabel.fontSize = 20;
+        renameLabel.color = label.color;
+        renameLabel.alignment = TextAnchor.MiddleCenter;
+        renameLabel.raycastTarget = false;
+        renameLabel.enabled = true;
 
         var members = Instantiate(label);
         members.name = "LanRoomMembers";
