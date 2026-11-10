@@ -1729,8 +1729,13 @@ class Match(asyncio.DatagramProtocol):
             status = struct.unpack_from("<5f", data, 18)
             if not all(map(math.isfinite, status)):
                 return
+            if player.scoped:
+                # UDP pose updates previously bypassed the TCP scoped lock and
+                # let a scoped player keep walking. Keep ground position fixed,
+                # but still accept yaw/aim.
+                status = (player.status[0], player.status[1], player.status[2], status[3], status[4])
             player.status = status
-            packet = frame(52, struct.pack("<HI", 1, player.id) + data[18:])
+            packet = frame(52, struct.pack("<HI", 1, player.id) + struct.pack("<5f", *status))
             for member in self.joined:
                 if member is not player and member.udp is not None:
                     self.transport.sendto(packet, member.udp)
