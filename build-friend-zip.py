@@ -12,16 +12,16 @@ ROOT = Path(__file__).resolve().parent
 GUIDE = """Mini Battlegrounds LAN · 102 复活模式
 
 1. 把整个 ZIP 解压到一个目录。
-2. 双击 Start Game.exe。同网只有一个房间时，客户端会自动加入。
-3. 如果没搜到，粘贴房主的 IP（局域网或公网）或邀请链接，点击加入房间。
+2. 双击 Start Game.exe，在「昵称」栏填自己的名字（会保存在 launcher.ini）。
+3. 地址栏会带出房主地址；没有就粘贴房主的 IP（局域网或公网），点击加入房间。
 4. 在游戏大厅点「开始游戏」表示准备，等房主开局。
 
-这个包供加入房间使用。房主仍须在自己的电脑上运行服务端。
+这个包供加入房间使用。房主仍须在自己的电脑或 ECS 上运行服务端。
 适用 Windows 10 / 11。可以给 Start Game.exe 创建桌面快捷方式。
 """
 
 
-def build(output, client):
+def build(output, client, host=None):
     output = output.resolve()
     if output.suffix.lower() != ".zip" or output.exists():
         raise ValueError("Choose a new .zip output path.")
@@ -36,6 +36,8 @@ def build(output, client):
                         "/reference:System.Drawing.dll", f"/out:{stage / 'Start Game.exe'}",
                         str(ROOT / "lan-launcher.cs")], check=True)
         copy_runtime(stage / "client", client)
+        if host:
+            (stage / "server.txt").write_text(str(host) + "\n", encoding="ascii")
         (stage / "README.txt").write_text(GUIDE, encoding="utf-8-sig")
         archive = Path(shutil.make_archive(str(stage.parent / stage.name) + "-client", "zip", stage))
         try:
@@ -48,5 +50,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("output", type=Path)
     parser.add_argument("--client", default=SOURCE, type=Path, help="prepared client directory")
+    parser.add_argument("--host", help="host IP pre-filled in the launcher's server.txt")
     args = parser.parse_args()
-    build(args.output, args.client)
+    build(args.output, args.client, args.host)
