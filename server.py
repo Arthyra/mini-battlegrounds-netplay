@@ -125,7 +125,7 @@ VEHICLE_SPECS = {
 }
 # Hatchback is the quickest, pickup is the slowest, van sits between.
 VEHICLE_DRIVE_SPEEDS = {
-    1: (13.0, 6.0),
+    1: (16.0, 7.5),
     2: (9.0, 4.0),
     3: (11.0, 5.0),
 }
@@ -1101,6 +1101,8 @@ class Match(asyncio.DatagramProtocol):
             player.guns[slot].next_shot = 0.0
         player.equip_ready_at = now + SWITCH_EQUIP_TIME
         self.broadcast(SWITCH_WEAPON, struct.pack("<II", player.id, player.selected_id()))
+        if slot < MELEE_SLOT and not player.guns[slot].ammo:
+            self.start_reload(player, now)
 
     def cancel_item(self, player):
         if player.throw_started or player.throw_at or player.med_casting:
