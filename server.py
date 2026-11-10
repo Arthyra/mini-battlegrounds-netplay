@@ -23,6 +23,7 @@ BATTLE_UDP_PORT = 43135
 BATTLE_ID = 1
 BATTLE_LOAD_TIMEOUT = 90.0
 WORLD_ID = 1
+LAN_VERSION = "lan-v3"
 MAP_ID = 102
 MAX_PLAYERS = 8
 LOOT_SPAWN = 50
@@ -513,9 +514,10 @@ async def send(writer, message, payload=b""):
 
 
 class Match(asyncio.DatagramProtocol):
-    def __init__(self, host, size, stock_vehicles=False):
+    def __init__(self, host, size, stock_vehicles=False, owner_profile=None):
         self.host = host
         self.size = size
+        self.owner_profile = owner_profile.casefold() if owner_profile else None
         self.players = {}
         self.owner = None
         self.battle_id = BATTLE_ID
@@ -582,10 +584,25 @@ class Match(asyncio.DatagramProtocol):
         for player in members:
             player.room_ready = False
         if self.owner not in members:
-            self.owner = members[0] if members else None
+            if self.owner_profile:
+                self.owner = next((p for p in members if p.profile_name == self.owner_profile), None)
+            else:
+                self.owner = members[0] if members else None
         self.battle_id += 1
         self.reset_round_state()
         self.send_room_state()
+
+    def player_left(self, player):
+        # Let the remaining clients remove the unit instead of leaving a frozen body.
+        if player in self.joined:
+            self.joined.remove(player)
+        if player in self.queued:
+            self.queued.remove(player)
+        packet = frame(214, struct.pack("<I", player.id))
+        for member in self.joined:
+            if member.battle is not None:
+                member.battle.write(packet)
+        print(f"battle left: player {player.id}", flush=True)
 
     @staticmethod
     def skin_applies(player):
@@ -599,8 +616,13 @@ class Match(asyncio.DatagramProtocol):
             "nickname": player.nickname,
             "skins": [[*key, value] for key, value in sorted(player.skins.items())],
         }
+        text = json.dumps(self.saved_profiles, indent=2) + "\n"
         temporary = self.profile_path.with_suffix(".tmp")
-        temporary.write_text(json.dumps(self.saved_profiles, indent=2) + "\n", encoding="utf-8")
+        temporary.write_text(text, encoding="utf-8")
+        try:
+            self.profile_path.with_suffix(".bak").write_text(text, encoding="utf-8")
+        except OSError:
+            pass
         temporary.replace(self.profile_path)
 
     async def login(self, reader, writer):
@@ -617,8 +639,11 @@ class Match(asyncio.DatagramProtocol):
         if len(payload) >= 6:
             size, = struct.unpack_from("<H", payload, 4)
             name = payload[6:6 + size].decode("utf-16le", errors="replace")
-            if name != "1" and re.fullmatch(r"[a-zA-Z0-9_-]{1,32}", name):
-                player.profile_name = name.casefold()
+            profile, separator, version = name.partition("|")
+            if not separator or version != LAN_VERSION:
+                raise ValueError("Client version mismatch; update the LAN client.")
+            if profile != "1" and re.fullmatch(r"[a-zA-Z0-9_-]{1,32}", profile):
+                player.profile_name = profile.casefold()
         if any(p.profile_name == player.profile_name for p in self.players.values()):
             raise ValueError("Choose a different -lan-profile for each client.")
         saved = self.saved_profiles.get(player.profile_name, {})
@@ -657,7 +682,10 @@ class Match(asyncio.DatagramProtocol):
     def release_lobby_slot(self, player):
         del self.players[player.id]
         if self.owner is player:
-            self.owner = next(iter(self.lobby_members()), None)
+            if self.owner_profile and player.profile_name == self.owner_profile:
+                self.owner = None
+            else:
+                self.owner = next(iter(self.lobby_members()), None)
         self.send_room_state()
 
     def start_room(self, owner):
@@ -682,7 +710,7 @@ class Match(asyncio.DatagramProtocol):
         if self.queued or player is None or player.world_ticket != ticket or player.world is not None:
             raise ValueError("Unknown or duplicate test player, or room already started")
         player.world = writer
-        if self.owner is None:
+        if self.owner is None and (self.owner_profile is None or player.profile_name == self.owner_profile):
             self.owner = player
         try:
             await self.run_lobby(player, reader, writer)
@@ -773,6 +801,7 @@ class Match(asyncio.DatagramProtocol):
                 else:
                     if player.vehicle:
                         self.unmount(player)
+                    self.player_left(player)
                     if all(member.battle is None for member in self.joined):
                         self.finish_round("all players left")
 
@@ -1585,8 +1614,8 @@ class LanDiscovery(asyncio.DatagramProtocol):
             self.transport.sendto(b"MBG-LAN-ROOM-1 " + self.host.encode("ascii"), addr)
 
 
-async def main(host, bind, size, stock_vehicles=False, share=False):
-    match = Match(host, size, stock_vehicles)
+async def main(host, bind, size, stock_vehicles=False, share=False, owner_profile=None):
+    match = Match(host, size, stock_vehicles, owner_profile)
     async with (
         await asyncio.start_server(handler(match.login), bind, LOGIN_PORT),
         await asyncio.start_server(handler(match.world), bind, WORLD_PORT),
@@ -1622,6 +1651,7 @@ if __name__ == "__main__":
     parser.add_argument("--bind", type=ipaddress.IPv4Address, help="local IPv4 to bind (default: --host, or 0.0.0.0 for a public host)")
     parser.add_argument("--share-client", action="store_true", help="prepare a LAN download and open the host client")
     parser.add_argument("--stock-vehicles", action="store_true", help="Use the three stock vehicle appearances")
+    parser.add_argument("--owner-profile", help="profile name that always owns the room (for example slot-1)")
     args = parser.parse_args()
     if args.host is None:
         if args.share_client:
@@ -1641,6 +1671,6 @@ if __name__ == "__main__":
     if args.share_client and not (args.host.is_private or args.host.is_loopback):
         parser.error("--share-client is for LAN hosts; use a public client prepared separately")
     try:
-        asyncio.run(main(str(args.host), str(args.bind), args.players, args.stock_vehicles, args.share_client))
+        asyncio.run(main(str(args.host), str(args.bind), args.players, args.stock_vehicles, args.share_client, args.owner_profile))
     except KeyboardInterrupt:
         pass

@@ -934,6 +934,7 @@ internal static class PatchCombat
         startsWith.Parameters.Add(new ParameterDefinition(core.String));
         var substring = new MethodReference("Substring", core.String, core.String) { HasThis = true };
         substring.Parameters.Add(new ParameterDefinition(core.Int32));
+        var concat = module.ImportReference(typeof(string).GetMethod("Concat", new[] { typeof(string), typeof(string) }));
         var loop = il.Create(OpCodes.Ldloc, index);
         var next = il.Create(OpCodes.Ldloc, index);
         var fallback = il.Create(OpCodes.Ldstr, "pc-");
@@ -957,6 +958,8 @@ internal static class PatchCombat
         il.Emit(OpCodes.Ldloc, arg);
         il.Emit(OpCodes.Ldc_I4, prefix.Length);
         il.Emit(OpCodes.Callvirt, substring);
+        il.Emit(OpCodes.Ldstr, "|lan-v3");
+        il.Emit(OpCodes.Call, concat);
         il.Emit(OpCodes.Ret);
         il.Append(next);
         il.Emit(OpCodes.Ldc_I4_1);
@@ -966,7 +969,9 @@ internal static class PatchCombat
         il.Append(fallback);
         il.Emit(OpCodes.Call, module.ImportReference(typeof(Environment).GetProperty("MachineName").GetGetMethod()));
         il.Emit(OpCodes.Callvirt, module.ImportReference(typeof(string).GetMethod("ToLowerInvariant")));
-        il.Emit(OpCodes.Call, module.ImportReference(typeof(string).GetMethod("Concat", new[] { typeof(string), typeof(string) })));
+        il.Emit(OpCodes.Call, concat);
+        il.Emit(OpCodes.Ldstr, "|lan-v3");
+        il.Emit(OpCodes.Call, concat);
         il.Emit(OpCodes.Ret);
         var account = request.Body.Instructions[1];
         if (account.OpCode != OpCodes.Ldstr || (string)account.Operand != "1")
@@ -1122,6 +1127,56 @@ internal static class PatchCombat
             skipRefresh);
     }
 
+    private static void InstallUnitLeave(ModuleDefinition module)
+    {
+        var battle = module.GetType("CS.Battle");
+        var unit = module.GetType("CS.Unit");
+        var core = module.TypeSystem;
+        var units = battle.Fields.Single(f => f.Name == "mUnits");
+        var getUnit = battle.Methods.Single(m => m.Name == "GetUnit");
+        var destroy = unit.Methods.Single(m => m.Name == "Destroy" && m.Parameters.Count == 0);
+
+        var remove = new MethodReference("Remove", core.Boolean, units.FieldType) { HasThis = true };
+        remove.Parameters.Add(new ParameterDefinition(unit));
+
+        var method = new MethodDefinition("RemoveUnit", MethodAttributes.Public, core.Void);
+        method.Parameters.Add(new ParameterDefinition("id", ParameterAttributes.None, core.UInt32));
+        battle.Methods.Add(method);
+        var unitValue = new VariableDefinition(unit);
+        method.Body.Variables.Add(unitValue);
+        var il = method.Body.GetILProcessor();
+        var ret = il.Create(OpCodes.Ret);
+        il.Emit(OpCodes.Ldarg_0);
+        il.Emit(OpCodes.Ldarg_1);
+        il.Emit(OpCodes.Call, getUnit);
+        il.Emit(OpCodes.Stloc, unitValue);
+        il.Emit(OpCodes.Ldloc, unitValue);
+        il.Emit(OpCodes.Brfalse, ret);
+        il.Emit(OpCodes.Ldarg_0);
+        il.Emit(OpCodes.Ldfld, units);
+        il.Emit(OpCodes.Ldloc, unitValue);
+        il.Emit(OpCodes.Callvirt, remove);
+        il.Emit(OpCodes.Pop);
+        il.Emit(OpCodes.Ldloc, unitValue);
+        il.Emit(OpCodes.Callvirt, destroy);
+        il.Append(ret);
+
+        // The server sends 214 when a battle connection drops. Remove that unit
+        // instead of leaving the other clients with a frozen character.
+        var handle = battle.Methods.Single(m => m.Name == "HandleMessages");
+        var instructions = handle.Body.GetILProcessor();
+        var original = handle.Body.Instructions[0];
+        var readId = module.ImportReference(typeof(System.IO.BinaryReader).GetMethod("ReadUInt32"));
+        instructions.InsertBefore(original, instructions.Create(OpCodes.Ldarg_1));
+        instructions.InsertBefore(original, instructions.Create(OpCodes.Ldc_I4, 214));
+        instructions.InsertBefore(original, instructions.Create(OpCodes.Bne_Un, original));
+        instructions.InsertBefore(original, instructions.Create(OpCodes.Ldarg_0));
+        instructions.InsertBefore(original, instructions.Create(OpCodes.Ldarg_2));
+        instructions.InsertBefore(original, instructions.Create(OpCodes.Callvirt, readId));
+        instructions.InsertBefore(original, instructions.Create(OpCodes.Call, method));
+        instructions.InsertBefore(original, instructions.Create(OpCodes.Ret));
+    }
+
     private static void InstallVehiclePropImpact(ModuleDefinition module, TypeDefinition battle)
     {
         var handler = Method(battle, "HandleVehicleHitObstacle", "System.IO.BinaryReader");
@@ -1257,6 +1312,7 @@ internal static class PatchCombat
                 Console.WriteLine("step notices"); InstallEliminationNotices(module, battle, unit);
                 Console.WriteLine("step profile"); InstallProfileName(module);
                 Console.WriteLine("step nickname"); InstallNickname(module);
+        InstallUnitLeave(module);
                 try
                 {
                     module.Write(args[1]);

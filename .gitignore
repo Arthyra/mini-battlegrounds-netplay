@@ -13,3 +13,6 @@
 !/handoff.md
 !/lan-launcher.cs
 !/build-friend-zip.py
+!/build-release.py
+!/test-public-battle.py
+
