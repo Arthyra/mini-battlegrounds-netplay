@@ -455,6 +455,7 @@ internal sealed class LanLauncher : Form
                 RedirectStandardOutput = true,
                 RedirectStandardError = true
             };
+            StopOwnServers(serverExe);
             serverProcess = Process.Start(info);
             serverProcess.OutputDataReceived += (sender, args) => { };
             serverProcess.ErrorDataReceived += (sender, args) => { };
@@ -478,6 +479,22 @@ internal sealed class LanLauncher : Form
         {
             StopRoom();
             MessageBox.Show("创建房间失败：\n" + error.Message, "Mini Battlegrounds");
+        }
+    }
+
+    private static void StopOwnServers(string expected)
+    {
+        foreach (var process in Process.GetProcessesByName("server"))
+        {
+            try
+            {
+                if (!process.HasExited &&
+                    string.Equals(process.MainModule.FileName, expected, StringComparison.OrdinalIgnoreCase))
+                    process.Kill();
+            }
+            catch
+            {
+            }
         }
     }
 
