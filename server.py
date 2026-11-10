@@ -11,6 +11,7 @@ import re
 from pathlib import Path
 from random import choice, shuffle, uniform
 from secrets import randbits, token_hex
+import socket
 import struct
 import sys
 import time
@@ -1745,8 +1746,23 @@ class Match(asyncio.DatagramProtocol):
                         print(f"battle UDP 82 -> 52; player {player.id} to {member.id}", flush=True)
 
 
+def enable_keepalive(writer):
+    sock = writer.get_extra_info("socket")
+    if sock is None:
+        return
+    try:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+        for name, value in (("TCP_KEEPIDLE", 30), ("TCP_KEEPINTVL", 10), ("TCP_KEEPCNT", 3)):
+            option = getattr(socket, name, None)
+            if option is not None:
+                sock.setsockopt(socket.IPPROTO_TCP, option, value)
+    except OSError:
+        pass
+
+
 def handler(fn):
     async def run(reader, writer):
+        enable_keepalive(writer)
         try:
             await fn(reader, writer)
         except (asyncio.IncompleteReadError, ConnectionError):
