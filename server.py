@@ -1878,6 +1878,8 @@ if __name__ == "__main__":
     if args.share_client and not (args.host.is_private or args.host.is_loopback):
         parser.error("--share-client is for LAN hosts; use a public client prepared separately")
     try:
+        if sys.platform == "win32":
+            asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
         asyncio.run(main(str(args.host), str(args.bind), args.players, args.stock_vehicles, args.share_client,
                           args.owner_profile, args.admin_port, args.admin_token))
     except KeyboardInterrupt:

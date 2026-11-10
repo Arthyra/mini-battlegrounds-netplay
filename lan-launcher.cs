@@ -758,13 +758,20 @@ internal sealed class LanLauncher : Form
         var wasHosting = serverProcess != null;
         if (serverProcess != null)
         {
+            var pid = serverProcess.Id;
             try
             {
-                if (!serverProcess.HasExited)
-                    serverProcess.Kill();
+                var killer = Process.Start(new ProcessStartInfo("taskkill.exe", "/PID " + pid + " /T /F")
+                {
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                });
+                if (killer != null)
+                    killer.WaitForExit(4000);
             }
             catch
             {
+                try { serverProcess.Kill(); } catch { }
             }
             serverProcess = null;
         }
