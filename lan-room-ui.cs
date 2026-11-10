@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Text;
 using System.Reflection;
 using UnityEngine;
 using UnityEngine.UI;
@@ -13,12 +14,17 @@ public sealed class LanRoomUI : MonoBehaviour
     private static bool isReady;
     private static bool isOwner;
     private static bool started;
+    private static int listedCount;
+    private static readonly string[] memberNames = new string[8];
+    private static readonly bool[] memberReady = new bool[8];
+    private static readonly bool[] memberOwner = new bool[8];
 
     private Button readyButton;
     private Button startButton;
     private Button renameButton;
     private Text readyLabel;
     private Text statusLabel;
+    private Text memberLabel;
     private bool renaming;
     private string editName = string.Empty;
     private string renameMessage = string.Empty;
@@ -38,6 +44,10 @@ public sealed class LanRoomUI : MonoBehaviour
     {
         readyCount = memberCount = capacity = 0;
         isReady = isOwner = started = false;
+        listedCount = 0;
+        Array.Clear(memberNames, 0, memberNames.Length);
+        Array.Clear(memberReady, 0, memberReady.Length);
+        Array.Clear(memberOwner, 0, memberOwner.Length);
     }
 
     public static void Receive(BinaryReader reader)
@@ -48,6 +58,17 @@ public sealed class LanRoomUI : MonoBehaviour
         isReady = reader.ReadBoolean();
         isOwner = reader.ReadBoolean();
         started = reader.ReadBoolean();
+        listedCount = reader.ReadUInt16();
+        if (listedCount > 8)
+            listedCount = 8;
+        for (var i = 0; i < listedCount; i++)
+        {
+            reader.ReadUInt32();
+            memberReady[i] = reader.ReadBoolean();
+            memberOwner[i] = reader.ReadBoolean();
+            var length = reader.ReadUInt16();
+            memberNames[i] = Encoding.Unicode.GetString(reader.ReadBytes(length));
+        }
     }
 
     public static void Attach(Button ready, Text label, UnityAction start)
@@ -92,11 +113,27 @@ public sealed class LanRoomUI : MonoBehaviour
         renameText.text = "\u6539\u540d";
         renameText.fontSize = 20;
 
+        var members = Instantiate(label);
+        members.name = "LanRoomMembers";
+        members.transform.SetParent(root, false);
+        var membersRect = members.rectTransform;
+        membersRect.anchorMin = membersRect.anchorMax = new Vector2(1, 1);
+        membersRect.pivot = new Vector2(1, 1);
+        membersRect.anchoredPosition = new Vector2(-12, -150);
+        membersRect.sizeDelta = new Vector2(360, 250);
+        members.fontSize = 18;
+        members.color = Color.white;
+        members.alignment = TextAnchor.UpperRight;
+        members.resizeTextForBestFit = false;
+        members.raycastTarget = false;
+        members.gameObject.AddComponent<Shadow>().effectDistance = new Vector2(1, -1);
+
         var view = ready.gameObject.AddComponent<LanRoomUI>();
         view.readyButton = ready;
         view.startButton = launch;
         view.readyLabel = label;
         view.statusLabel = status;
+        view.memberLabel = members;
         rename.onClick = new Button.ButtonClickedEvent();
         rename.onClick.AddListener(() =>
         {
@@ -133,6 +170,27 @@ public sealed class LanRoomUI : MonoBehaviour
             : (isReady ? "\u5339\u914d\u4e2d" + new string('.', 1 + (int)(Time.unscaledTime * 3) % 3) : "\u7b49\u5f85\u51c6\u5907");
         statusLabel.text = started ? caption : string.Format("{0}  {1}/{2} \u4eba\u51c6\u5907  (\u4e0a\u9650 {3})",
                                                            caption, readyCount, memberCount, capacity);
+        if (memberLabel != null)
+        {
+            if (capacity == 0 || started || listedCount == 0)
+            {
+                memberLabel.text = "";
+            }
+            else
+            {
+                var builder = new StringBuilder();
+                for (var i = 0; i < listedCount; i++)
+                {
+                    if (i > 0)
+                        builder.Append('\n');
+                    builder.Append(memberNames[i]);
+                    if (memberOwner[i])
+                        builder.Append("  \u623f\u4e3b");
+                    builder.Append(memberReady[i] ? "  \u5df2\u51c6\u5907" : "  \u672a\u51c6\u5907");
+                }
+                memberLabel.text = builder.ToString();
+            }
+        }
     }
 
     private void OnGUI()

@@ -8,7 +8,7 @@ WORLD = 43123
 BATTLE = 43134
 UDP = 43135
 WORLD_ID = 1
-VERSION = "|lan-v3"
+VERSION = "|lan-v4"
 
 
 def frame(message, payload=b""):
@@ -81,7 +81,7 @@ def connect_battle(world, player_id):
     assert msg == 34, (msg, data)
     error, udp_port, assigned, world_id, map_id = struct.unpack_from("<HIIHI", data)
     assert error == 0 and assigned == player_id and world_id == WORLD_ID and map_id == 102
-    return battle, battle_id, udp_port
+    return battle, battle_id, udp_port, host, port
 
 
 def recv_until(sock, wanted, timeout=10):
@@ -103,8 +103,8 @@ def main():
     ready(b)
     time.sleep(0.2)
     start(a)
-    a_battle, battle_id, udp_port = connect_battle(a, a_id)
-    b_battle, _, _ = connect_battle(b, b_id)
+    a_battle, battle_id, udp_port, battle_host, battle_port = connect_battle(a, a_id)
+    b_battle, _, _, _, _ = connect_battle(b, b_id)
     print("battle", battle_id, "udp", udp_port)
     recv_until(a_battle, {37}, timeout=5)
     recv_until(b_battle, {37}, timeout=5)
@@ -120,6 +120,7 @@ def main():
     for sock, player_id in ((ua, a_id), (ub, b_id)):
         sock.sendto(struct.pack("<HHIHII", 18, 0, battle_id, WORLD_ID, player_id, player_id), (HOST, UDP))
     time.sleep(0.2)
+    time.sleep(0.5)
     status = struct.pack("<5f", 10.0, 15.0, 20.0, 30.0, 0.0)
     ua.sendto(struct.pack("<HHIHII", 38, 82, battle_id, WORLD_ID, a_id, a_id) + status, (HOST, UDP))
     ub.settimeout(5)
@@ -130,10 +131,14 @@ def main():
     print("udp 82 -> 52 ok")
 
     a_battle.close()
-    msg, data = recv_until(b_battle, {214}, timeout=5)
-    left_id = struct.unpack_from("<I", data)[0]
-    print("leave 214 ok", left_id)
-    assert left_id == a_id
+    time.sleep(1)
+    a2 = socket.create_connection((battle_host, battle_port), timeout=5)
+    a2.sendall(frame(34, struct.pack("<IHI", battle_id, WORLD_ID, a_id)))
+    msg, data = recv_msg(a2)
+    assert msg == 34, (msg, data)
+    recv_until(a2, {37}, timeout=5)
+    print("reconnect 34/37 ok")
+    a2.close()
 
     b_battle.close()
     a.close()
@@ -145,6 +150,11 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+
+
+
 
 
 

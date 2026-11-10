@@ -5,7 +5,7 @@
 ## 仓库与本机位置
 
 - 当前项目根目录是 `C:/GameInstall/mini battleground/map102-test`。从这个目录运行服务器和构建命令。
-- GitHub 私有仓库是 [Ash-Rise/mini-battlegrounds-lan](https://github.com/Ash-Rise/mini-battlegrounds-lan)。当前远端 `main` 包含房间 UI、LAN 下载、多局重置、Windows 玩家启动器、公网 ECS 和 LanRoomUI 改名，对应 [私有 Release lan-player-v0.4](https://github.com/Ash-Rise/mini-battlegrounds-lan/releases/tag/lan-player-v0.4)。接手先看 `git status -sb` 和 `git diff`。
+- GitHub 私有仓库是 [Ash-Rise/mini-battlegrounds-lan](https://github.com/Ash-Rise/mini-battlegrounds-lan)。当前远端 `main` 包含房间 UI、LAN 下载、多局重置、Windows 玩家启动器、公网 ECS 和 LanRoomUI 改名，对应 [私有 Release lan-player-v0.5](https://github.com/Ash-Rise/mini-battlegrounds-lan/releases/tag/lan-player-v0.5)。接手先看 `git status -sb` 和 `git diff`。
 - Windows 客户端在项目的 `client/CrazyShooter.exe`，基于 Steam Build 2655148（32 位 Unity 5.6.3、Mono），已准备好 102 资源和本地登录。APK 来源是 `C:/Workspace/Mini+Battlegrounds_1.0.5_APKPure.apk`（Unity 2017.4），两套资源不能整包混用。
 - 前一环境的分析和构建材料在 `C:/Users/Example/Documents/Codex/2026-11-09/mini-battleground-steam-4399-qq-22/work`。以下把它简称为 `work`。新 harness 未必附带这个目录，需要能访问同一台 Windows 的文件。仓库单独克隆只有源码。玩家可以从私有 Release 下载已经准备好的客户端。
 - `client/`、APK、原版素材、`lan-profiles.json`、运行日志和导出 JSON 都是本地文件，仓库采用白名单式 `.gitignore`。已准备好的客户端作为约 80 MB 的私有 Release 附件分发，包含 102 地图和原版游戏资源。Git 历史仍只跟踪源码与文档。若以后要公开源码，先核对仓库的 Release 附件和提交历史。
@@ -14,7 +14,7 @@
 
 ### 玩家
 
-从 [私有 Release 下载 Windows 玩家包](https://github.com/Ash-Rise/mini-battlegrounds-lan/releases/download/lan-player-v0.4/Mini-Battlegrounds-LAN-Windows.zip)，完整解压后双击 `Start Game.exe`。下载者的 GitHub 账号需要仓库访问权限。包已带 102 客户端，玩家无需安装 Steam 或 Python。默认地址为公网 ECS `198.51.100.10`，局域网时在启动器里改成房主 IPv4。同一局域网只发现一个房间时会自动连接，搜不到时粘贴房主的 IPv4 或邀请链接，再点「加入房间」。也可以给启动器创建桌面快捷方式。
+从 [私有 Release 下载 Windows 玩家包](https://github.com/Ash-Rise/mini-battlegrounds-lan/releases/download/lan-player-v0.5/Mini-Battlegrounds-LAN-Windows.zip)，完整解压后双击 `Start Game.exe`。下载者的 GitHub 账号需要仓库访问权限。包已带 102 客户端，玩家无需安装 Steam 或 Python。默认地址为公网 ECS `198.51.100.10`，局域网时在启动器里改成房主 IPv4。同一局域网只发现一个房间时会自动连接，搜不到时粘贴房主的 IPv4 或邀请链接，再点「加入房间」。也可以给启动器创建桌面快捷方式。
 
 ### 房主
 
@@ -86,13 +86,17 @@ $csc = "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
 - 昵称在联机大厅的 LanRoomUI「改名」按钮或 F2 修改，客户端发 213，服务端保存后回发 117 并刷新大厅顶栏；启动器不再负责昵称，只自动分配唯一 `pc-<机器名>` 档案。
 - 公网客户端 ZIP 是本地文件，放在 `map102-test/dist/`，不要提交 Git；朋友通过 Release 或网盘分发。公网服务端没有鉴权，UDP 票据仍等于玩家 ID，只适合熟人。
 - P0 已补：登录 `lan-v3` 版本握手；固定房主档案；战斗断线广播 214 让其他客户端删除角色；每次保存档案同步写 `lan-profiles.json.bak`。已用两个协议客户端从本机经公网 ECS 验证登录、准备、开局、TCP 43134、UDP 43135 和 214。
-- 尚未实测：两台不同网络的真实 Unity 客户端完整对局；完整对局重连（当前只有掉线清理）；ECS 重启后的自动拉起。
+- 房间成员列表：210 房间状态追加成员 id/准备/房主/名字，LanRoomUI 右上角显示；协议版本升到 `lan-v4`。
+- 战斗重连：服务端保留断线玩家 30 秒，期间不广播 214；客户端 `BattleTcpServerProxy.OnDisconnect` 每秒尝试重连并补发 34，重连成功继续原局；超时后由服务端清理并广播 214。已用协议客户端验证断线后 34/37 重连；真实客户端自动重连仍待双机验证。
+- 贴图：只把建筑使用的 lightmap（index 1，texture 20）恢复原彩色；路面/道具 index 0 和地形 index 2 继续用暖色单色，避免人行道彩纹。
+- 尚未实测：两台不同网络的真实 Unity 客户端完整对局；真实客户端自动重连；ECS 重启后的自动拉起。
 
 ## 生成朋友用的 ZIP
 
 运行 `python .\build-release.py --version 0.4` 会自动编译启动器、打包 `dist/Mini-Battlegrounds-LAN-Windows.zip`、写 `dist/release-v0.4.json`（大小、SHA256、提交、时间）；加 `--publish` 会创建并设为 Latest 的 GitHub Release。打包源的 `Assembly-CSharp.dll` 和 `LanRoomUI.dll` 都须支持 `-lan-host`。
 
 本机项目的 `client/` 目前仍是启动器改动前的房主测试构建，可继续用于固定地址的邀请 ZIP。要重新生成 Release 玩家包，使用已验证的 `work/map102-player-stage/client`，或按上面的步骤重建两份 DLL 后再打包。
+
 
 
 

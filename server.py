@@ -22,8 +22,9 @@ BATTLE_PORT = 43134
 BATTLE_UDP_PORT = 43135
 BATTLE_ID = 1
 BATTLE_LOAD_TIMEOUT = 90.0
+RECONNECT_GRACE = 30.0
 WORLD_ID = 1
-LAN_VERSION = "lan-v3"
+LAN_VERSION = "lan-v4"
 MAP_ID = 102
 MAX_PLAYERS = 8
 LOOT_SPAWN = 50
@@ -359,6 +360,7 @@ class Player:
     room_ready: bool = False
     battle: asyncio.StreamWriter | None = None
     udp: tuple | None = None
+    disconnected_at: float = 0.0
     ready: bool = False
     status: tuple[float, ...] = field(init=False)
     guns: list[EquippedGun] = field(init=False)
@@ -670,9 +672,13 @@ class Match(asyncio.DatagramProtocol):
     def send_room_state(self):
         members = self.lobby_members()
         ready = sum(p.room_ready for p in members)
+        member_data = struct.pack("<H", len(members))
+        for player in members:
+            name = player.name()
+            member_data += struct.pack("<IBBH", player.id, player.room_ready, player is self.owner, len(name)) + name
         for member in members:
             payload = struct.pack("<BBB???", ready, len(members), self.size,
-                                  member.room_ready, member is self.owner, bool(self.queued))
+                                  member.room_ready, member is self.owner, bool(self.queued)) + member_data
             member.world.write(frame(ROOM_STATE, payload))
 
     def is_local_peer(self, writer):
@@ -787,10 +793,17 @@ class Match(asyncio.DatagramProtocol):
             raise ValueError("Unexpected first battle message")
         battle_id, world_id, player_id = struct.unpack("<IHI", payload)
         player = self.players.get(player_id)
-        if (battle_id, world_id) != (self.battle_id, WORLD_ID) or player not in self.queued or player in self.joined:
+        if (battle_id, world_id) != (self.battle_id, WORLD_ID) or player not in self.queued or player.battle is not None:
             raise ValueError("Unknown or duplicate battle player")
+        reconnect = player in self.joined
+        if reconnect and not player.disconnected_at:
+            raise ValueError("Duplicate battle player")
+        if not reconnect:
+            self.joined.append(player)
         player.battle = writer
-        self.joined.append(player)
+        player.disconnected_at = 0.0
+        if reconnect:
+            print(f"battle reconnect <- 34; player {player.id}", flush=True)
         try:
             await self.run_battle(player, reader, writer, battle_id)
         finally:
@@ -799,11 +812,10 @@ class Match(asyncio.DatagramProtocol):
                 if not self.started:
                     self.finish_round("a player disconnected while loading")
                 else:
-                    if player.vehicle:
-                        self.unmount(player)
-                    self.player_left(player)
-                    if all(member.battle is None for member in self.joined):
-                        self.finish_round("all players left")
+                    player.disconnected_at = time.monotonic()
+                    player.firing = False
+                    player.reload_at = 0.0
+                    print(f"battle disconnected; waiting for player {player.id}", flush=True)
 
     async def run_battle(self, player, reader, writer, battle_id):
         print(f"battle <- 34; player {player.id}", flush=True)
@@ -834,9 +846,9 @@ class Match(asyncio.DatagramProtocol):
                         frame(SWITCH_WEAPON, struct.pack("<II", equipped.id, equipped.weapon_id(PRIMARY_SLOT)))
                         for equipped in self.joined
                     )
+                    self.started = True
                     for member in self.joined:
                         member.battle.write(initial_state)
-                    self.started = True
             elif self.started:
                 self.battle_input(player, message, payload)
 
@@ -1512,6 +1524,14 @@ class Match(asyncio.DatagramProtocol):
             if not self.started:
                 if self.queued and now >= self.loading_deadline:
                     self.finish_round("loading timed out")
+                continue
+            for player in list(self.joined):
+                if player.disconnected_at and now - player.disconnected_at >= RECONNECT_GRACE:
+                    if player.vehicle:
+                        self.unmount(player)
+                    self.player_left(player)
+            if not self.joined:
+                self.finish_round("all players left")
                 continue
             for player in self.joined:
                 if player.battle is None or player.battle.is_closing():

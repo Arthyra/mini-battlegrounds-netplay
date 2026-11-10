@@ -958,7 +958,7 @@ internal static class PatchCombat
         il.Emit(OpCodes.Ldloc, arg);
         il.Emit(OpCodes.Ldc_I4, prefix.Length);
         il.Emit(OpCodes.Callvirt, substring);
-        il.Emit(OpCodes.Ldstr, "|lan-v3");
+        il.Emit(OpCodes.Ldstr, "|lan-v4");
         il.Emit(OpCodes.Call, concat);
         il.Emit(OpCodes.Ret);
         il.Append(next);
@@ -970,7 +970,7 @@ internal static class PatchCombat
         il.Emit(OpCodes.Call, module.ImportReference(typeof(Environment).GetProperty("MachineName").GetGetMethod()));
         il.Emit(OpCodes.Callvirt, module.ImportReference(typeof(string).GetMethod("ToLowerInvariant")));
         il.Emit(OpCodes.Call, concat);
-        il.Emit(OpCodes.Ldstr, "|lan-v3");
+        il.Emit(OpCodes.Ldstr, "|lan-v4");
         il.Emit(OpCodes.Call, concat);
         il.Emit(OpCodes.Ret);
         var account = request.Body.Instructions[1];
@@ -1177,6 +1177,103 @@ internal static class PatchCombat
         instructions.InsertBefore(original, instructions.Create(OpCodes.Ret));
     }
 
+    private static void InstallReconnect(ModuleDefinition module)
+    {
+        var battleProxy = module.GetType("CS.BattleTcpServerProxy");
+        var local = module.GetType("CS.LocalPlayer");
+        var info = module.GetType("CS.BattleServerInfo");
+        var packet = module.GetType("CS.NetPacket");
+        var manager = module.GetType("CS.ServerProxyManager");
+        var duid = module.GetType("CS.DUID");
+        var buffer = module.GetType("CS.NetBuffer");
+        var peer = module.GetType("CS.TcpPeer");
+        var core = module.TypeSystem;
+
+        var reconnect = new MethodDefinition("ReconnectLanBattle", MethodAttributes.Public, core.Boolean);
+        battleProxy.Methods.Add(reconnect);
+        var serverInfo = new VariableDefinition(info);
+        var request = new VariableDefinition(packet);
+        var attempts = new VariableDefinition(core.Int32);
+        reconnect.Body.Variables.Add(serverInfo);
+        reconnect.Body.Variables.Add(request);
+        reconnect.Body.Variables.Add(attempts);
+        var il = reconnect.Body.GetILProcessor();
+        var fail = il.Create(OpCodes.Ldc_I4_0);
+        var loop = il.Create(OpCodes.Nop);
+        var next = il.Create(OpCodes.Nop);
+
+        il.Emit(OpCodes.Call, Method(local, "get_Instance"));
+        il.Emit(OpCodes.Callvirt, Method(local, "GetBattleServerInfo"));
+        il.Emit(OpCodes.Stloc, serverInfo);
+        il.Emit(OpCodes.Ldloc, serverInfo);
+        il.Emit(OpCodes.Brfalse, fail);
+        il.Emit(OpCodes.Ldloc, serverInfo);
+        il.Emit(OpCodes.Ldfld, info.Fields.Single(f => f.Name == "mAddress"));
+        il.Emit(OpCodes.Brfalse, fail);
+        il.Emit(OpCodes.Ldc_I4_0);
+        il.Emit(OpCodes.Stloc, attempts);
+        il.Append(loop);
+        il.Emit(OpCodes.Ldc_I4, 1000);
+        il.Emit(OpCodes.Call, module.ImportReference(typeof(System.Threading.Thread).GetMethod("Sleep", new[] { typeof(int) })));
+        il.Emit(OpCodes.Call, Method(manager, "get_Instance"));
+        il.Emit(OpCodes.Ldloc, serverInfo);
+        il.Emit(OpCodes.Ldfld, info.Fields.Single(f => f.Name == "mAddress"));
+        il.Emit(OpCodes.Ldloc, serverInfo);
+        il.Emit(OpCodes.Ldfld, info.Fields.Single(f => f.Name == "mTcpPort"));
+        il.Emit(OpCodes.Callvirt, Method(manager, "ConnectToBattleTcpServer", "System.String", "System.Int32"));
+        il.Emit(OpCodes.Brfalse, next);
+
+        il.Emit(OpCodes.Newobj, Method(packet, ".ctor"));
+        il.Emit(OpCodes.Stloc, request);
+        il.Emit(OpCodes.Ldloc, request);
+        il.Emit(OpCodes.Ldc_I4, 34);
+        il.Emit(OpCodes.Callvirt, Method(packet, "Push", "System.UInt16"));
+        il.Emit(OpCodes.Ldloc, request);
+        il.Emit(OpCodes.Call, Method(local, "get_Instance"));
+        il.Emit(OpCodes.Callvirt, Method(local, "GetBattleID"));
+        il.Emit(OpCodes.Callvirt, Method(packet, "Push", "System.UInt32"));
+        il.Emit(OpCodes.Ldloc, request);
+        il.Emit(OpCodes.Call, Method(local, "get_Instance"));
+        il.Emit(OpCodes.Callvirt, Method(local, "GetDUID"));
+        il.Emit(OpCodes.Callvirt, Method(duid, "GetMain"));
+        il.Emit(OpCodes.Callvirt, Method(packet, "Push", "System.UInt16"));
+        il.Emit(OpCodes.Ldloc, request);
+        il.Emit(OpCodes.Call, Method(local, "get_Instance"));
+        il.Emit(OpCodes.Callvirt, Method(local, "GetDUID"));
+        il.Emit(OpCodes.Callvirt, Method(duid, "GetSub"));
+        il.Emit(OpCodes.Callvirt, Method(packet, "Push", "System.UInt32"));
+        il.Emit(OpCodes.Ldloc, request);
+        il.Emit(OpCodes.Callvirt, Method(packet, "UpdateHeader"));
+        il.Emit(OpCodes.Call, Method(manager, "get_Instance"));
+        il.Emit(OpCodes.Callvirt, Method(manager, "GetBattleTcpServerProxy"));
+        il.Emit(OpCodes.Ldloc, request);
+        il.Emit(OpCodes.Callvirt, Method(buffer, "get_Base"));
+        il.Emit(OpCodes.Callvirt, Method(peer, "Send", "System.Byte[]"));
+        il.Emit(OpCodes.Ldc_I4_1);
+        il.Emit(OpCodes.Ret);
+
+        il.Append(next);
+        il.Emit(OpCodes.Ldloc, attempts);
+        il.Emit(OpCodes.Ldc_I4_1);
+        il.Emit(OpCodes.Add);
+        il.Emit(OpCodes.Dup);
+        il.Emit(OpCodes.Stloc, attempts);
+        il.Emit(OpCodes.Ldc_I4, 20);
+        il.Emit(OpCodes.Blt, loop);
+        il.Append(fail);
+        il.Emit(OpCodes.Ret);
+
+        var disconnect = battleProxy.Methods.Single(m => m.Name == "OnDisconnect");
+        var body = disconnect.Body.GetILProcessor();
+        var fallback = disconnect.Body.Instructions.Single(i => i.OpCode == OpCodes.Callvirt &&
+            ((MethodReference)i.Operand).Name == "DisconnectAll");
+        var done = body.Create(OpCodes.Ret);
+        body.Append(done);
+        body.InsertBefore(fallback, body.Create(OpCodes.Ldarg_0));
+        body.InsertBefore(fallback, body.Create(OpCodes.Call, reconnect));
+        body.InsertBefore(fallback, body.Create(OpCodes.Brtrue, done));
+    }
+
     private static void InstallVehiclePropImpact(ModuleDefinition module, TypeDefinition battle)
     {
         var handler = Method(battle, "HandleVehicleHitObstacle", "System.IO.BinaryReader");
@@ -1313,6 +1410,7 @@ internal static class PatchCombat
                 Console.WriteLine("step profile"); InstallProfileName(module);
                 Console.WriteLine("step nickname"); InstallNickname(module);
         InstallUnitLeave(module);
+        InstallReconnect(module);
                 try
                 {
                     module.Write(args[1]);
@@ -1333,3 +1431,4 @@ internal static class PatchCombat
         }
     }
 }
+
