@@ -50,6 +50,7 @@ THROWABLE_HIT_VEHICLE = 69
 INCENDIARY_HIT_UNIT = 70
 INCENDIARY_HIT_VEHICLE = 71
 VEHICLES_SPAWN = 72
+VEHICLE_SPAWN = 73
 VEHICLES_STATUS = 74
 VEHICLE_HIT_OBSTACLE = 75
 VEHICLE_HIT_UNIT = 76
@@ -246,6 +247,7 @@ class Vehicle:
     health: float = field(init=False)
     controls: set[int] = field(default_factory=set)
     contacts: set[int] = field(default_factory=set)
+    destroyed_at: float = 0.0
 
     def __post_init__(self):
         self.health = self.spec[0]
@@ -576,11 +578,12 @@ class Match(asyncio.DatagramProtocol):
         kinds = [1 + skin_offset, 2 + skin_offset, 3 + skin_offset]
         spawn_kinds = kinds + [choice(kinds)]
         shuffle(spawn_kinds)
-        spots = ((-62.0, -8.0), (-20.0, -12.0), (12.0, -12.0), (79.0, -3.0))
+        spots = ((-62.0, -8.0), (-45.0, -8.0), (12.0, -12.0), (79.0, -3.0))
         self.vehicles = {
             101 + index: Vehicle(101 + index, spawn_kinds[index], x, z)
             for index, (x, z) in enumerate(spots)
         }
+        self.next_vehicle_id = 105
         self.bullet_id = 0
         self.rockets = []
         self.grenades = []
@@ -1189,6 +1192,7 @@ class Match(asyncio.DatagramProtocol):
         occupants = set(vehicle.occupants.values())
         if not vehicle.health:
             vehicle.speed = 0.0
+            vehicle.destroyed_at = now
             for occupant in occupants:
                 self.unmount(self.players[occupant])
         self.broadcast(message, packet)
@@ -1667,6 +1671,17 @@ class Match(asyncio.DatagramProtocol):
             self.rockets = pending
             self.update_grenades(now)
 
+            for vehicle in list(self.vehicles.values()):
+                if vehicle.health <= 0 and vehicle.destroyed_at and now - vehicle.destroyed_at >= 20.0:
+                    del self.vehicles[vehicle.id]
+                    new_id = self.next_vehicle_id
+                    self.next_vehicle_id += 1
+                    kind = choice([1 + self.vehicle_skin_offset, 2 + self.vehicle_skin_offset, 3 + self.vehicle_skin_offset])
+                    replacement = Vehicle(new_id, kind, vehicle.x, vehicle.z)
+                    self.vehicles[new_id] = replacement
+                    self.broadcast(VEHICLE_SPAWN, struct.pack("<II", replacement.id, replacement.kind) + replacement.status())
+                    print(f"vehicle {vehicle.id} respawned as {new_id}", flush=True)
+
             updates = []
             for vehicle in self.vehicles.values():
                 previous_x, previous_z, previous_speed = vehicle.x, vehicle.z, vehicle.speed
@@ -1826,6 +1841,8 @@ if __name__ == "__main__":
                           args.owner_profile, args.admin_port, args.admin_token))
     except KeyboardInterrupt:
         pass
+
+
 
 
 
