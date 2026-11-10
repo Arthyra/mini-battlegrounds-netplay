@@ -29,6 +29,7 @@ internal sealed class LanLauncher : Form
     private Process serverProcess;
     private Process gameProcess;
     private Button logButton;
+    private Button firewallButton;
     private string serverLogPath;
     private readonly StringBuilder serverLog = new StringBuilder();
     private readonly object serverLogLock = new object();
@@ -95,7 +96,7 @@ internal sealed class LanLauncher : Form
         LoadSettings(out profile);
         SaveSettings(profile);
         Text = "Mini Battlegrounds LAN";
-        ClientSize = new Size(480, 235);
+        ClientSize = new Size(480, 275);
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
@@ -115,7 +116,11 @@ internal sealed class LanLauncher : Form
         logButton.Text = "日志";
         logButton.Enabled = false;
         logButton.Click += (sender, args) => OpenServerLog();
-        Controls.AddRange(new Control[] { status, cloud, create, search, manual, logButton });
+        firewallButton = new Button();
+        firewallButton.SetBounds(15, 180, 140, 30);
+        firewallButton.Text = "防火墙放行";
+        firewallButton.Click += (sender, args) => AllowFirewall(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "server", "server.exe"));
+        Controls.AddRange(new Control[] { status, cloud, create, search, manual, logButton, firewallButton });
         AcceptButton = cloud;
         Shown += async (sender, args) => await CheckForUpdate();
         cloud.Click += (sender, args) => JoinHost(CloudHost);
@@ -587,6 +592,11 @@ internal sealed class LanLauncher : Form
             MessageBox.Show("没有找到可用的局域网 IPv4。\n请先连接同一个 Wi-Fi/手机热点，再创建房间。", "Mini Battlegrounds");
             return;
         }
+        if (!AllowFirewall(serverExe))
+        {
+            MessageBox.Show("没有成功放行 server.exe 的防火墙。\n请在 Windows 防火墙允许 server\\server.exe 的专用/公用网络访问。", "Mini Battlegrounds");
+            return;
+        }
         try
         {
             var info = new ProcessStartInfo(serverExe,
@@ -625,6 +635,58 @@ internal sealed class LanLauncher : Form
         {
             StopRoom();
             MessageBox.Show("创建房间失败：\n" + error.Message, "Mini Battlegrounds");
+        }
+    }
+
+    private static bool FirewallRuleExists(string serverExe)
+    {
+        try
+        {
+            var info = new ProcessStartInfo("netsh",
+                "advfirewall firewall show rule name=\"Mini Battlegrounds LAN Server\"")
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true
+            };
+            using (var process = Process.Start(info))
+            {
+                var output = process.StandardOutput.ReadToEnd() + process.StandardError.ReadToEnd();
+                process.WaitForExit(3000);
+                return output.IndexOf(serverExe, StringComparison.OrdinalIgnoreCase) >= 0;
+            }
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool AllowFirewall(string serverExe)
+    {
+        if (!File.Exists(serverExe) || FirewallRuleExists(serverExe))
+            return true;
+        try
+        {
+            var command = "/c netsh advfirewall firewall delete rule name=\"Mini Battlegrounds LAN Server\" >nul 2>&1 & " +
+                "netsh advfirewall firewall add rule name=\"Mini Battlegrounds LAN Server\" dir=in action=allow program=\"" +
+                serverExe + "\" enable=yes profile=any";
+            var info = new ProcessStartInfo("cmd.exe", command)
+            {
+                UseShellExecute = true,
+                Verb = "runas",
+                WindowStyle = ProcessWindowStyle.Hidden
+            };
+            using (var process = Process.Start(info))
+            {
+                process.WaitForExit(15000);
+                return process.HasExited && process.ExitCode == 0;
+            }
+        }
+        catch
+        {
+            return false;
         }
     }
 
