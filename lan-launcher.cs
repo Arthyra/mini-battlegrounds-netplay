@@ -27,6 +27,11 @@ internal sealed class LanLauncher : Form
     private readonly Button manual = new Button();
     private readonly Label status = new Label();
     private Process serverProcess;
+    private Process gameProcess;
+    private Button logButton;
+    private string serverLogPath;
+    private readonly StringBuilder serverLog = new StringBuilder();
+    private readonly object serverLogLock = new object();
     private readonly string profile;
 
     [STAThread]
@@ -82,22 +87,27 @@ internal sealed class LanLauncher : Form
         LoadSettings(out profile);
         SaveSettings(profile);
         Text = "Mini Battlegrounds LAN";
-        ClientSize = new Size(460, 185);
+        ClientSize = new Size(480, 235);
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
 
-        status.SetBounds(15, 15, 430, 48);
+        status.SetBounds(15, 15, 450, 64);
         status.Text = "加入云服务器，或创建/搜索局域网房间。";
-        cloud.SetBounds(15, 75, 430, 42);
+        cloud.SetBounds(15, 85, 450, 40);
         cloud.Text = "加入云服务器（杭州）";
-        create.SetBounds(15, 130, 140, 30);
+        create.SetBounds(15, 140, 140, 30);
         create.Text = "创建局域网房间";
-        search.SetBounds(165, 130, 110, 30);
+        search.SetBounds(165, 140, 110, 30);
         search.Text = "搜索局域网房间";
-        manual.SetBounds(285, 130, 160, 30);
+        manual.SetBounds(285, 140, 130, 30);
         manual.Text = "手动地址…";
-        Controls.AddRange(new Control[] { status, cloud, create, search, manual });
+        logButton = new Button();
+        logButton.SetBounds(425, 140, 55, 30);
+        logButton.Text = "日志";
+        logButton.Enabled = false;
+        logButton.Click += (sender, args) => OpenServerLog();
+        Controls.AddRange(new Control[] { status, cloud, create, search, manual, logButton });
         AcceptButton = cloud;
         Shown += async (sender, args) => await CheckForUpdate();
         cloud.Click += (sender, args) => JoinHost(CloudHost);
@@ -170,9 +180,8 @@ internal sealed class LanLauncher : Form
             status.Text = "地址无效，请输入房主 IPv4。";
             return;
         }
-        status.Text = "正在连接 " + host + "…";
-        if (StartGame(host, profile))
-            Close();
+        status.Text = "已启动客户端：目标 " + host + "，档案 " + profile + "。\n登录卡住时看房主服务端日志，或检查防火墙。";
+        gameProcess = StartGame(host, profile);
     }
 
     private string ChooseRoom(System.Collections.Generic.IEnumerable<string> rooms)
@@ -234,6 +243,46 @@ internal sealed class LanLauncher : Form
     private static readonly string VersionFile = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "version.txt");
     private const string UpdateUrl = "http://198.51.100.10:8080/update/latest.json";
 
+    private sealed class UpdateProgress
+    {
+        public int Percent;
+        public string Text;
+    }
+
+    private sealed class UpdateProgressForm : Form
+    {
+        private readonly ProgressBar bar = new ProgressBar();
+        private readonly Label label = new Label();
+
+        public UpdateProgressForm()
+        {
+            Text = "Mini Battlegrounds 更新";
+            ClientSize = new Size(430, 120);
+            FormBorderStyle = FormBorderStyle.FixedDialog;
+            MaximizeBox = false;
+            MinimizeBox = false;
+            ControlBox = false;
+            StartPosition = FormStartPosition.CenterParent;
+            ShowInTaskbar = false;
+            TopMost = true;
+            bar.SetBounds(20, 55, 390, 22);
+            bar.Minimum = 0;
+            bar.Maximum = 100;
+            label.SetBounds(20, 18, 390, 30);
+            label.Text = "准备更新…";
+            Controls.Add(label);
+            Controls.Add(bar);
+        }
+
+        public void Report(UpdateProgress progress)
+        {
+            if (IsDisposed)
+                return;
+            bar.Value = Math.Max(0, Math.Min(100, progress.Percent));
+            label.Text = (progress.Text ?? "更新中…") + "  " + progress.Percent + "%";
+        }
+    }
+
     private async Task CheckForUpdate()
     {
         UpdateInfo latest;
@@ -252,31 +301,40 @@ internal sealed class LanLauncher : Form
                 "Mini Battlegrounds", MessageBoxButtons.YesNo, MessageBoxIcon.Information) != DialogResult.Yes)
             return;
 
-        Cursor.Current = Cursors.WaitCursor;
         string error = null;
-        try
+        using (var dialog = new UpdateProgressForm())
         {
-            await Task.Run(() => ApplyUpdate(latest));
-        }
-        catch (Exception exception)
-        {
-            error = exception.Message;
-        }
-        finally
-        {
-            Cursor.Current = Cursors.Default;
+            dialog.Show(this);
+            var reporter = new Progress<UpdateProgress>(dialog.Report);
+            try
+            {
+                await Task.Run(() => ApplyUpdate(latest, reporter));
+            }
+            catch (Exception exception)
+            {
+                error = exception.Message;
+            }
+            finally
+            {
+                dialog.Close();
+            }
         }
         if (error != null)
         {
             MessageBox.Show("自动更新失败：\n" + error, "Mini Battlegrounds");
             return;
         }
+        var newLauncher = Path.Combine(AppDomain.CurrentDomain.BaseDirectory,
+            Path.GetFileNameWithoutExtension(Application.ExecutablePath) + ".new" + Path.GetExtension(Application.ExecutablePath));
         MessageBox.Show("更新完成，正在启动新版本。", "Mini Battlegrounds");
+        if (File.Exists(newLauncher))
+            StartReplacement(newLauncher);
+        else
+            Process.Start(new ProcessStartInfo(Application.ExecutablePath)
+            {
+                WorkingDirectory = AppDomain.CurrentDomain.BaseDirectory
+            });
         Close();
-        Process.Start(new ProcessStartInfo(Application.ExecutablePath)
-        {
-            WorkingDirectory = AppDomain.CurrentDomain.BaseDirectory
-        });
     }
 
     private static UpdateInfo FetchUpdate()
@@ -294,7 +352,7 @@ internal sealed class LanLauncher : Form
         }
     }
 
-    private static void ApplyUpdate(UpdateInfo latest)
+    private static void ApplyUpdate(UpdateInfo latest, IProgress<UpdateProgress> progress)
     {
         if (string.IsNullOrWhiteSpace(latest.Url))
             throw new InvalidOperationException("更新地址为空。");
@@ -303,8 +361,17 @@ internal sealed class LanLauncher : Form
         try
         {
             var archive = Path.Combine(temporary, "update.zip");
+            progress.Report(new UpdateProgress { Percent = 2, Text = "连接更新服务器…" });
             using (var client = new WebClient())
+            {
+                client.DownloadProgressChanged += (sender, args) =>
+                {
+                    var percent = 5 + args.ProgressPercentage * 65 / 100;
+                    progress.Report(new UpdateProgress { Percent = percent, Text = "下载更新包…" });
+                };
                 client.DownloadFile(latest.Url, archive);
+            }
+            progress.Report(new UpdateProgress { Percent = 72, Text = "校验更新包…" });
             if (!string.IsNullOrEmpty(latest.Sha256))
             {
                 using (var sha = SHA256.Create())
@@ -315,19 +382,42 @@ internal sealed class LanLauncher : Form
                         throw new InvalidDataException("更新包校验失败。");
                 }
             }
+            progress.Report(new UpdateProgress { Percent = 80, Text = "解压更新包…" });
             var extracted = Path.Combine(temporary, "extract");
             ZipFile.ExtractToDirectory(archive, extracted);
             var newClient = Path.Combine(extracted, "client");
             if (!Directory.Exists(newClient))
                 throw new InvalidDataException("更新包缺少 client 目录。");
+            progress.Report(new UpdateProgress { Percent = 86, Text = "更新客户端…" });
             CopyDirectory(newClient, Client);
+
             var root = AppDomain.CurrentDomain.BaseDirectory;
+            var newServer = Path.Combine(extracted, "server");
+            if (Directory.Exists(newServer))
+            {
+                progress.Report(new UpdateProgress { Percent = 91, Text = "更新内置服务端…" });
+                StopOwnServers(Path.Combine(root, "server", "server.exe"));
+                CopyDirectory(newServer, Path.Combine(root, "server"));
+            }
+
+            var launcherName = Path.GetFileName(Application.ExecutablePath);
+            var newLauncherSource = Path.Combine(extracted, launcherName);
+            if (File.Exists(newLauncherSource))
+            {
+                progress.Report(new UpdateProgress { Percent = 95, Text = "准备更新启动器…" });
+                File.Copy(newLauncherSource,
+                    Path.Combine(root, Path.GetFileNameWithoutExtension(launcherName) + ".new" + Path.GetExtension(launcherName)),
+                    true);
+            }
+
+            progress.Report(new UpdateProgress { Percent = 97, Text = "更新版本信息…" });
             foreach (var name in new[] { "README.txt", "server.txt", "version.txt" })
             {
                 var source = Path.Combine(extracted, name);
                 if (File.Exists(source))
                     File.Copy(source, Path.Combine(root, name), true);
             }
+            progress.Report(new UpdateProgress { Percent = 100, Text = "更新完成" });
         }
         finally
         {
@@ -339,6 +429,41 @@ internal sealed class LanLauncher : Form
             {
             }
         }
+    }
+
+    private static void StartReplacement(string newLauncher)
+    {
+        var root = AppDomain.CurrentDomain.BaseDirectory;
+        var currentName = Path.GetFileName(Application.ExecutablePath);
+        var newName = Path.GetFileName(newLauncher);
+        var script = Path.Combine(root, "apply-update.cmd");
+        var pid = Process.GetCurrentProcess().Id;
+        var lines = new[]
+        {
+            "@echo off",
+            "cd /d \"%~dp0\"",
+            ":wait",
+            "tasklist /FI \"PID eq " + pid + "\" | find \"" + pid + "\" >nul",
+            "if not errorlevel 1 (",
+            "  timeout /t 1 /nobreak >nul",
+            "  goto wait",
+            ")",
+            "for /l %%i in (1,1,20) do (",
+            "  move /Y \"" + newName + "\" \"" + currentName + "\" >nul 2>&1",
+            "  if not errorlevel 1 goto done",
+            "  timeout /t 1 /nobreak >nul",
+            ")",
+            ":done",
+            "start \"\" \"" + currentName + "\"",
+            "del \"%~f0\"",
+        };
+        File.WriteAllLines(script, lines, Encoding.Default);
+        Process.Start(new ProcessStartInfo("cmd.exe", "/c \"" + script + "\"")
+        {
+            WorkingDirectory = root,
+            UseShellExecute = true,
+            CreateNoWindow = true
+        });
     }
 
     private static void CopyDirectory(string source, string destination)
@@ -456,24 +581,27 @@ internal sealed class LanLauncher : Form
                 RedirectStandardError = true
             };
             StopOwnServers(serverExe);
+            StopOwnServers(serverExe);
+            serverLogPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "launcher-server.log");
+            try { File.WriteAllText(serverLogPath, ""); } catch { }
             serverProcess = Process.Start(info);
-            serverProcess.OutputDataReceived += (sender, args) => { };
-            serverProcess.ErrorDataReceived += (sender, args) => { };
+            serverProcess.OutputDataReceived += (sender, args) => AppendServerLog(args.Data);
+            serverProcess.ErrorDataReceived += (sender, args) => AppendServerLog(args.Data);
             serverProcess.BeginOutputReadLine();
             serverProcess.BeginErrorReadLine();
             if (!WaitForPort(host, 43120, 12000))
             {
+                var detail = serverLog.ToString().Trim();
+                var exit = serverProcess != null && serverProcess.HasExited ? " 退出码 " + serverProcess.ExitCode : "";
                 StopRoom();
-                MessageBox.Show("服务端没有在 12 秒内启动。请检查防火墙或服务端文件。", "Mini Battlegrounds");
+                MessageBox.Show("服务端没有在 12 秒内启动。" + exit +
+                    "\n\n" + (detail.Length > 0 ? detail : "没有服务端输出；检查 server\\server.exe、防火墙和端口占用。") +
+                    "\n\n日志：" + serverLogPath, "Mini Battlegrounds");
                 return;
             }
-            status.Text = "局域网房间已创建：" + host;
+            status.Text = "局域网房间已创建：" + host + "\n房主档案 slot-1；服务端日志已开启。";
             create.Text = "关闭局域网房间";
-            Process.Start(new ProcessStartInfo(Path.Combine(Client, "CrazyShooter.exe"),
-                "-screen-fullscreen 0 -lan-host=" + host + " -lan-profile=slot-1")
-            {
-                WorkingDirectory = Client
-            });
+            gameProcess = StartGame(host, "slot-1");
         }
         catch (Exception error)
         {
@@ -522,6 +650,7 @@ internal sealed class LanLauncher : Form
 
     private void StopRoom()
     {
+        var wasHosting = serverProcess != null;
         if (serverProcess != null)
         {
             try
@@ -534,9 +663,58 @@ internal sealed class LanLauncher : Form
             }
             serverProcess = null;
         }
+        if (wasHosting && gameProcess != null)
+        {
+            try
+            {
+                if (!gameProcess.HasExited)
+                    gameProcess.Kill();
+            }
+            catch
+            {
+            }
+        }
+        if (wasHosting)
+            gameProcess = null;
+        logButton.Enabled = false;
         create.Text = "\u521b\u5efa\u5c40\u57df\u7f51\u623f\u95f4";
-        if (status.Text.StartsWith("\u5c40\u57df\u7f51\u623f\u95f4\u5df2\u521b\u5efa", StringComparison.Ordinal))
-            status.Text = "\u623f\u95f4\u5df2\u5173\u95ed";
+        if (wasHosting)
+            status.Text = "局域网房间已关闭，房主客户端已退出。";
+    }
+
+    private void AppendServerLog(string line)
+    {
+        if (string.IsNullOrEmpty(line))
+            return;
+        lock (serverLogLock)
+        {
+            serverLog.AppendLine(line);
+            try
+            {
+                if (!string.IsNullOrEmpty(serverLogPath))
+                    File.AppendAllText(serverLogPath, line + Environment.NewLine, Encoding.UTF8);
+            }
+            catch
+            {
+            }
+        }
+    }
+
+    private void OpenServerLog()
+    {
+        if (string.IsNullOrEmpty(serverLogPath) || !File.Exists(serverLogPath))
+        {
+            MessageBox.Show("还没有服务端日志。先创建一次局域网房间。", "Mini Battlegrounds");
+            return;
+        }
+        try
+        {
+            Process.Start("notepad.exe", "\"" + serverLogPath + "\"");
+        }
+        catch (Exception error)
+        {
+            MessageBox.Show(error.Message, "Mini Battlegrounds");
+        }
     }
 
     private static bool TryHost(string text, out string host)
@@ -557,27 +735,26 @@ internal sealed class LanLauncher : Form
         return false;
     }
 
-    private static bool StartGame(string host, string profile)
+    private static Process StartGame(string host, string profile)
     {
         var executable = Path.Combine(Client, "CrazyShooter.exe");
         if (!File.Exists(executable))
         {
             MessageBox.Show("\u8bf7\u5148\u5c06 ZIP \u5168\u90e8\u89e3\u538b\uff0c\u4fdd\u7559 client \u76ee\u5f55\u3002", "Mini Battlegrounds");
-            return false;
+            return null;
         }
         var arguments = "-screen-fullscreen 0 -lan-host=" + host + " -lan-profile=" + profile;
         try
         {
-            Process.Start(new ProcessStartInfo(executable, arguments)
+            return Process.Start(new ProcessStartInfo(executable, arguments)
             {
                 WorkingDirectory = Client
             });
-            return true;
         }
         catch (System.ComponentModel.Win32Exception error)
         {
             MessageBox.Show(error.Message, "Mini Battlegrounds");
-            return false;
+            return null;
         }
     }
 
@@ -630,6 +807,8 @@ internal sealed class LanLauncher : Form
         }
     }
 }
+
+
 
 
 
