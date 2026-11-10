@@ -708,8 +708,16 @@ class Match(asyncio.DatagramProtocol):
                 raise ValueError("Client version mismatch; update the LAN client.")
             if profile != "1" and re.fullmatch(r"[a-zA-Z0-9_-]{1,32}", profile):
                 player.profile_name = profile.casefold()
-        if any(p.profile_name == player.profile_name for p in self.players.values()):
-            raise ValueError("Choose a different -lan-profile for each client.")
+        duplicate = next((p for p in self.players.values() if p.profile_name == player.profile_name), None)
+        if duplicate is not None:
+            if self.queued or duplicate in self.joined or duplicate.battle is not None:
+                raise ValueError("Choose a different -lan-profile for each client.")
+            if duplicate.world is not None:
+                duplicate.world.close()
+            if self.owner is duplicate:
+                self.owner = None
+            del self.players[duplicate.id]
+            print(f"login: replaced stale lobby profile {player.profile_name}", flush=True)
         saved = self.saved_profiles.get(player.profile_name, {})
         player.character = saved.get("character", 1)
         player.nickname = saved.get("nickname", "")
@@ -1815,6 +1823,7 @@ if __name__ == "__main__":
                           args.owner_profile, args.admin_port, args.admin_token))
     except KeyboardInterrupt:
         pass
+
 
 
 
