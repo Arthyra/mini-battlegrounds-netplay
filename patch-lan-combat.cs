@@ -300,6 +300,8 @@ internal static class PatchCombat
 
         var scopeState = new FieldDefinition("mLanScopeActive", FieldAttributes.Private, module.TypeSystem.Boolean);
         local.Fields.Add(scopeState);
+        var motionField = local.Fields.Single(f => f.Name == "mMotion");
+        var vectorZero = module.ImportReference(Method(engine.GetType("UnityEngine.Vector3"), "get_zero"));
         var send = new MethodDefinition("SendLanScopeState", MethodAttributes.Private, module.TypeSystem.Void);
         send.Parameters.Add(new ParameterDefinition("active", ParameterAttributes.None, module.TypeSystem.Boolean));
         local.Methods.Add(send);
@@ -316,6 +318,16 @@ internal static class PatchCombat
         il.Emit(OpCodes.Ldarg_0);
         il.Emit(OpCodes.Ldarg_1);
         il.Emit(OpCodes.Stfld, scopeState);
+        // Scoped sniping is stationary, matching the APK sniper mode.
+        var settled = il.Create(OpCodes.Nop);
+        il.Emit(OpCodes.Ldarg_1);
+        il.Emit(OpCodes.Brfalse, settled);
+        il.Emit(OpCodes.Ldarg_0);
+        il.Emit(OpCodes.Call, Method(local, "StopMove"));
+        il.Emit(OpCodes.Ldarg_0);
+        il.Emit(OpCodes.Call, vectorZero);
+        il.Emit(OpCodes.Stfld, motionField);
+        il.Append(settled);
         il.Emit(OpCodes.Newobj, Method(packet, ".ctor"));
         il.Emit(OpCodes.Stloc, data);
         il.Emit(OpCodes.Ldloc, data);
@@ -332,6 +344,60 @@ internal static class PatchCombat
         il.Emit(OpCodes.Callvirt, Method(module.GetType("CS.NetBuffer"), "get_Base"));
         il.Emit(OpCodes.Callvirt, Method(module.GetType("CS.TcpPeer"), "Send", "System.Byte[]"));
         il.Append(ret);
+
+        // Block WASD translation while the shot is scoped. Mouse look and fire
+        // remain available, so the player can still aim and shoot on the spot.
+        var movement = Method(local, "Move", "System.Single");
+        var movementIl = movement.Body.GetILProcessor();
+        var movementStart = movement.Body.Instructions[0];
+        Before(movementIl, movementStart, movementIl.Create(OpCodes.Ldarg_0),
+            movementIl.Create(OpCodes.Ldfld, scopeState), movementIl.Create(OpCodes.Brfalse, movementStart),
+            movementIl.Create(OpCodes.Ret));
+
+        // The camera backs off for the scope, which pushes the character out of
+        // the default shadow distance. Keep the character shadow visible while
+        // scoped and restore the original setting afterwards.
+        var quality = engine.GetType("UnityEngine.QualitySettings");
+        var getShadow = module.ImportReference(Method(quality, "get_shadowDistance"));
+        var setShadow = module.ImportReference(Method(quality, "set_shadowDistance", "System.Single"));
+        var shadowSaved = new FieldDefinition("mLanShadowSaved", FieldAttributes.Private, module.TypeSystem.Boolean);
+        var shadowDistance = new FieldDefinition("mLanShadowDistance", FieldAttributes.Private, module.TypeSystem.Single);
+        local.Fields.Add(shadowSaved);
+        local.Fields.Add(shadowDistance);
+        var shadow = new MethodDefinition("LanUpdateScopeShadow", MethodAttributes.Private, module.TypeSystem.Void);
+        shadow.Parameters.Add(new ParameterDefinition("sight", ParameterAttributes.None, module.TypeSystem.Single));
+        local.Methods.Add(shadow);
+        var s = shadow.Body.GetILProcessor();
+        var shadowRet = s.Create(OpCodes.Ret);
+        var restoreShadow = s.Create(OpCodes.Nop);
+        var applyShadow = s.Create(OpCodes.Nop);
+        s.Emit(OpCodes.Ldarg_1);
+        s.Emit(OpCodes.Ldc_R4, 0f);
+        s.Emit(OpCodes.Ble, restoreShadow);
+        s.Emit(OpCodes.Ldarg_0);
+        s.Emit(OpCodes.Ldfld, shadowSaved);
+        s.Emit(OpCodes.Brtrue, applyShadow);
+        s.Emit(OpCodes.Ldarg_0);
+        s.Emit(OpCodes.Call, getShadow);
+        s.Emit(OpCodes.Stfld, shadowDistance);
+        s.Emit(OpCodes.Ldarg_0);
+        s.Emit(OpCodes.Ldc_I4_1);
+        s.Emit(OpCodes.Stfld, shadowSaved);
+        s.Append(applyShadow);
+        s.Emit(OpCodes.Ldc_R4, 600f);
+        s.Emit(OpCodes.Call, setShadow);
+        s.Emit(OpCodes.Ret);
+        s.Append(restoreShadow);
+        s.Emit(OpCodes.Ldarg_0);
+        s.Emit(OpCodes.Ldfld, shadowSaved);
+        s.Emit(OpCodes.Brfalse, shadowRet);
+        s.Emit(OpCodes.Ldarg_0);
+        s.Emit(OpCodes.Ldfld, shadowDistance);
+        s.Emit(OpCodes.Call, setShadow);
+        s.Emit(OpCodes.Ldarg_0);
+        s.Emit(OpCodes.Ldc_I4_0);
+        s.Emit(OpCodes.Stfld, shadowSaved);
+        s.Append(shadowRet);
 
         var scope = new MethodDefinition("UpdateLanSniperScope", MethodAttributes.Private, module.TypeSystem.Void);
         scope.Parameters.Add(new ParameterDefinition("delta", ParameterAttributes.None, module.TypeSystem.Single));
@@ -355,6 +421,9 @@ internal static class PatchCombat
         il.Emit(OpCodes.Ldc_R4, 0f);
         il.Emit(OpCodes.Cgt);
         il.Emit(OpCodes.Call, send);
+        il.Emit(OpCodes.Ldarg_0);
+        il.Emit(OpCodes.Ldloc, sight);
+        il.Emit(OpCodes.Call, shadow);
         il.Emit(OpCodes.Ldarg_0);
         il.Emit(OpCodes.Ldfld, local.Fields.Single(f => f.Name == "mCameraController"));
         il.Emit(OpCodes.Callvirt, Method(controller, "GetCamera"));
@@ -535,11 +604,47 @@ internal static class PatchCombat
         }
         il.Append(ret);
 
+        // Q sends a small "last weapon" request; the server owns the previous
+        // slot so every client sees the same switch.
+        var proxy = module.GetType("CS.ServerProxyManager");
+        var last = new MethodDefinition("SendLanLastWeapon", MethodAttributes.Private, module.TypeSystem.Void);
+        local.Methods.Add(last);
+        var lastIl = last.Body.GetILProcessor();
+        var lastData = new VariableDefinition(packet);
+        last.Body.Variables.Add(lastData);
+        lastIl.Emit(OpCodes.Newobj, Method(packet, ".ctor"));
+        lastIl.Emit(OpCodes.Stloc, lastData);
+        lastIl.Emit(OpCodes.Ldloc, lastData);
+        lastIl.Emit(OpCodes.Ldc_I4, 212);
+        lastIl.Emit(OpCodes.Callvirt, Method(packet, "Push", "System.UInt16"));
+        lastIl.Emit(OpCodes.Ldloc, lastData);
+        lastIl.Emit(OpCodes.Callvirt, Method(packet, "UpdateHeader"));
+        lastIl.Emit(OpCodes.Call, Method(proxy, "get_Instance"));
+        lastIl.Emit(OpCodes.Callvirt, Method(proxy, "GetBattleTcpServerProxy"));
+        lastIl.Emit(OpCodes.Ldloc, lastData);
+        lastIl.Emit(OpCodes.Callvirt, Method(module.GetType("CS.NetBuffer"), "get_Base"));
+        lastIl.Emit(OpCodes.Callvirt, Method(module.GetType("CS.TcpPeer"), "Send", "System.Byte[]"));
+        lastIl.Emit(OpCodes.Ret);
+
         var input = Method(local, "UpdateInput", "System.Single");
         il = input.Body.GetILProcessor();
         var keyOne = input.Body.Instructions.Single(i => i.OpCode == OpCodes.Ldc_I4_S &&
             (sbyte)i.Operand == 49 && i.Next.Operand.ToString().Contains("::GetKeyDown("));
         Before(il, keyOne, il.Create(OpCodes.Ldarg_0), il.Create(OpCodes.Call, wheel));
+        var muted = input.Body.Instructions.First(i => i.OpCode == OpCodes.Call &&
+            ((MethodReference)i.Operand).Name == "IsMuted");
+        var muteStart = muted.Previous;
+        var skipLast = il.Create(OpCodes.Nop);
+        var qStart = il.Create(OpCodes.Ldc_I4_S, (sbyte)113);
+        Before(il, muteStart, qStart,
+            il.Create(OpCodes.Call, module.ImportReference(Method(engine.GetType("UnityEngine.Input"), "GetKeyDown", "UnityEngine.KeyCode"))),
+            il.Create(OpCodes.Brfalse, skipLast), il.Create(OpCodes.Ldarg_0),
+            il.Create(OpCodes.Call, last), skipLast);
+        // The chat-focus path branches straight to the IsMuted check; retarget
+        // that branch to the new Q check so Q is reachable in normal play.
+        foreach (var branch in input.Body.Instructions)
+            if (branch.Operand == muteStart)
+                branch.Operand = qStart;
     }
 
     private static void InstallScopePose(ModuleDefinition module, TypeDefinition battle, TypeDefinition unit)
@@ -554,68 +659,116 @@ internal static class PatchCombat
         var setController = module.ImportReference(Method(animator, "set_runtimeAnimatorController", controller.FullName));
         var getController = module.ImportReference(Method(animator, "get_runtimeAnimatorController"));
         var setOverrideBase = module.ImportReference(Method(overrideType, "set_runtimeAnimatorController", controller.FullName));
-        var getOverrideBase = module.ImportReference(Method(overrideType, "get_runtimeAnimatorController"));
         var setClip = module.ImportReference(Method(overrideType, "set_Item", "System.String", clip.FullName));
         var animatorField = entity.Fields.Single(f => f.Name == "mAnimator");
         var cached = new FieldDefinition("mLanScopeController", FieldAttributes.Private, module.ImportReference(overrideType));
         entity.Fields.Add(cached);
+
+        // Wrap every unit animator once at creation. Swapping the whole runtime
+        // controller on scope exit reset the state machine and left the weapon
+        // dangling from the hand, so only the two rifle clips are overridden.
+        var wrap = new MethodDefinition("LanWrapAnimator", MethodAttributes.Public, module.TypeSystem.Void);
+        entity.Methods.Add(wrap);
+        var w = wrap.Body.GetILProcessor();
+        var wrapped = w.Create(OpCodes.Ret);
+        var current = new VariableDefinition(module.ImportReference(controller));
+        wrap.Body.Variables.Add(current);
+        w.Emit(OpCodes.Ldarg_0);
+        w.Emit(OpCodes.Ldfld, animatorField);
+        w.Emit(OpCodes.Brfalse, wrapped);
+        w.Emit(OpCodes.Ldarg_0);
+        w.Emit(OpCodes.Ldfld, animatorField);
+        w.Emit(OpCodes.Callvirt, getController);
+        w.Emit(OpCodes.Stloc, current);
+        w.Emit(OpCodes.Ldloc, current);
+        w.Emit(OpCodes.Brfalse, wrapped);
+        w.Emit(OpCodes.Ldarg_0);
+        w.Emit(OpCodes.Ldfld, cached);
+        w.Emit(OpCodes.Ldloc, current);
+        w.Emit(OpCodes.Ceq);
+        w.Emit(OpCodes.Brtrue, wrapped);
+        w.Emit(OpCodes.Ldarg_0);
+        w.Emit(OpCodes.Newobj, module.ImportReference(Method(overrideType, ".ctor")));
+        w.Emit(OpCodes.Stfld, cached);
+        w.Emit(OpCodes.Ldarg_0);
+        w.Emit(OpCodes.Ldfld, cached);
+        w.Emit(OpCodes.Ldloc, current);
+        w.Emit(OpCodes.Callvirt, setOverrideBase);
+        w.Emit(OpCodes.Ldarg_0);
+        w.Emit(OpCodes.Ldfld, animatorField);
+        w.Emit(OpCodes.Ldarg_0);
+        w.Emit(OpCodes.Ldfld, cached);
+        w.Emit(OpCodes.Callvirt, setController);
+        w.Append(wrapped);
+
+        var applyUnit = Method(entity, "ApplyUnit");
+        var applyIl = applyUnit.Body.GetILProcessor();
+        var originalController = applyUnit.Body.Instructions.Single(i => i.OpCode == OpCodes.Callvirt &&
+            ((MethodReference)i.Operand).Name == "set_runtimeAnimatorController");
+        Before(applyIl, originalController.Next, applyIl.Create(OpCodes.Ldarg_0), applyIl.Create(OpCodes.Call, wrap));
+
+        var bundles = module.GetType("CS.AssetBundleManager");
+        var unitBundle = module.GetType("CS.AssetBundleNames").Fields.Single(f => f.Name == "Unit");
+        var standard = module.GetType("CS.AssetBundleLoaderStandard");
+        var bundleType = engine.GetType("UnityEngine.AssetBundle");
+        var assetBundle = standard.Fields.Single(f => f.Name == "mAssetBundle");
+        var clipRef = module.ImportReference(clip);
+        var loadAsset = module.ImportReference(bundleType.Methods.Single(m => m.Name == "LoadAsset" &&
+            !m.HasGenericParameters && m.Parameters.Count == 1 && m.Parameters[0].ParameterType.FullName == "System.String"));
+        // AssetBundle.LoadAsset(name, Type) is non-generic. The generic
+        // GetAsset<T> call resolved to a Boolean load in the Mono 2.0 runtime
+        // and threw FormatException on the clip name.
+        var load = new MethodDefinition("LanLoadClip", MethodAttributes.Private | MethodAttributes.Static, clipRef);
+        load.Parameters.Add(new ParameterDefinition("name", ParameterAttributes.None, module.TypeSystem.String));
+        entity.Methods.Add(load);
+        var l = load.Body.GetILProcessor();
+        var noLoader = l.Create(OpCodes.Ldnull);
+        var loaded = l.Create(OpCodes.Ret);
+        var standardValue = new VariableDefinition(module.ImportReference(standard));
+        load.Body.Variables.Add(standardValue);
+        l.Emit(OpCodes.Call, Method(bundles, "get_Instance"));
+        l.Emit(OpCodes.Ldsfld, unitBundle);
+        l.Emit(OpCodes.Callvirt, Method(bundles, "Retrieve", "System.String"));
+        l.Emit(OpCodes.Isinst, standard);
+        l.Emit(OpCodes.Stloc, standardValue);
+        l.Emit(OpCodes.Ldloc, standardValue);
+        l.Emit(OpCodes.Brfalse, noLoader);
+        l.Emit(OpCodes.Ldloc, standardValue);
+        l.Emit(OpCodes.Ldfld, assetBundle);
+        l.Emit(OpCodes.Ldarg_0);
+        l.Emit(OpCodes.Callvirt, loadAsset);
+        l.Emit(OpCodes.Isinst, clipRef);
+        l.Emit(OpCodes.Ret);
+        l.Append(noLoader);
+        l.Append(loaded);
+
         var apply = new MethodDefinition("SetLanScopePose", MethodAttributes.Public, module.TypeSystem.Void);
         apply.Parameters.Add(new ParameterDefinition("scoped", ParameterAttributes.None, module.TypeSystem.Boolean));
         entity.Methods.Add(apply);
         var il = apply.Body.GetILProcessor();
         var ret = il.Create(OpCodes.Ret);
-        var enable = il.Create(OpCodes.Ldarg_0);
-        var assign = il.Create(OpCodes.Ldarg_0);
         il.Emit(OpCodes.Ldarg_0);
-        il.Emit(OpCodes.Ldfld, animatorField);
-        il.Emit(OpCodes.Brfalse, ret);
-        il.Emit(OpCodes.Ldarg_1);
-        il.Emit(OpCodes.Brtrue, enable);
+        il.Emit(OpCodes.Call, wrap);
         il.Emit(OpCodes.Ldarg_0);
         il.Emit(OpCodes.Ldfld, cached);
         il.Emit(OpCodes.Brfalse, ret);
-        il.Emit(OpCodes.Ldarg_0);
-        il.Emit(OpCodes.Ldfld, animatorField);
-        il.Emit(OpCodes.Ldarg_0);
-        il.Emit(OpCodes.Ldfld, cached);
-        il.Emit(OpCodes.Callvirt, getOverrideBase);
-        il.Emit(OpCodes.Callvirt, setController);
-        il.Emit(OpCodes.Br, ret);
-        il.Append(enable);
-        il.Emit(OpCodes.Ldfld, cached);
-        il.Emit(OpCodes.Brtrue, assign);
-
-        var bundles = module.GetType("CS.AssetBundleManager");
-        var unitBundle = module.GetType("CS.AssetBundleNames").Fields.Single(f => f.Name == "Unit");
-        var loadClip = new GenericInstanceMethod(Method(module.GetType("CS.AssetBundleLoader"), "GetAsset", "System.String"));
-        loadClip.GenericArguments.Add(module.ImportReference(clip));
-        il.Emit(OpCodes.Ldarg_0);
-        il.Emit(OpCodes.Newobj, module.ImportReference(Method(overrideType, ".ctor")));
-        il.Emit(OpCodes.Stfld, cached);
-        il.Emit(OpCodes.Ldarg_0);
-        il.Emit(OpCodes.Ldfld, cached);
-        il.Emit(OpCodes.Ldarg_0);
-        il.Emit(OpCodes.Ldfld, animatorField);
-        il.Emit(OpCodes.Callvirt, getController);
-        il.Emit(OpCodes.Callvirt, setOverrideBase);
         foreach (var action in new[] { "Hold", "Fire" })
         {
+            var normal = il.Create(OpCodes.Ldstr, action + "_Rifle");
+            var after = il.Create(OpCodes.Nop);
             il.Emit(OpCodes.Ldarg_0);
             il.Emit(OpCodes.Ldfld, cached);
             il.Emit(OpCodes.Ldstr, action + "_Rifle");
-            il.Emit(OpCodes.Call, Method(bundles, "get_Instance"));
-            il.Emit(OpCodes.Ldsfld, unitBundle);
-            il.Emit(OpCodes.Callvirt, Method(bundles, "Retrieve", "System.String"));
-            il.Emit(OpCodes.Ldstr, (action + "_Rifle_Snipe").ToLowerInvariant());
-            il.Emit(OpCodes.Callvirt, loadClip);
+            il.Emit(OpCodes.Ldarg_1);
+            il.Emit(OpCodes.Brfalse, normal);
+            il.Emit(OpCodes.Ldstr, action + "_Rifle_Snipe");
+            il.Emit(OpCodes.Br, after);
+            il.Append(normal);
+            il.Append(after);
+            il.Emit(OpCodes.Call, load);
             il.Emit(OpCodes.Callvirt, setClip);
         }
 
-        il.Append(assign);
-        il.Emit(OpCodes.Ldfld, animatorField);
-        il.Emit(OpCodes.Ldarg_0);
-        il.Emit(OpCodes.Ldfld, cached);
-        il.Emit(OpCodes.Callvirt, setController);
         il.Append(ret);
 
         var packet = new MethodDefinition("HandleLanScopePose", MethodAttributes.Private, module.TypeSystem.Void);
@@ -819,6 +972,100 @@ internal static class PatchCombat
         account.Operand = name;
     }
 
+    private static void InstallNickname(ModuleDefinition module)
+    {
+        const string prefix = "-lan-name=";
+        var world = module.GetType("CS.WorldServerProxy");
+        var core = module.TypeSystem;
+        var args = new VariableDefinition(new ArrayType(core.String));
+        var index = new VariableDefinition(core.Int32);
+        var arg = new VariableDefinition(core.String);
+        var environment = new TypeReference("System", "Environment", module, core.CoreLibrary);
+        var readArgs = new MethodReference("GetCommandLineArgs", args.VariableType, environment);
+        var startsWith = new MethodReference("StartsWith", core.Boolean, core.String) { HasThis = true };
+        startsWith.Parameters.Add(new ParameterDefinition(core.String));
+        var substring = new MethodReference("Substring", core.String, core.String) { HasThis = true };
+        substring.Parameters.Add(new ParameterDefinition(core.Int32));
+        var get = new MethodDefinition("GetLanNickname", MethodAttributes.Private | MethodAttributes.Static, core.String);
+        world.Methods.Add(get);
+        get.Body.Variables.Add(args);
+        get.Body.Variables.Add(index);
+        get.Body.Variables.Add(arg);
+        var il = get.Body.GetILProcessor();
+        var loop = il.Create(OpCodes.Ldloc, index);
+        var next = il.Create(OpCodes.Ldloc, index);
+        var none = il.Create(OpCodes.Ldnull);
+        il.Emit(OpCodes.Call, readArgs);
+        il.Emit(OpCodes.Stloc, args);
+        il.Emit(OpCodes.Ldc_I4_1);
+        il.Emit(OpCodes.Stloc, index);
+        il.Append(loop);
+        il.Emit(OpCodes.Ldloc, args);
+        il.Emit(OpCodes.Ldlen);
+        il.Emit(OpCodes.Conv_I4);
+        il.Emit(OpCodes.Bge, none);
+        il.Emit(OpCodes.Ldloc, args);
+        il.Emit(OpCodes.Ldloc, index);
+        il.Emit(OpCodes.Ldelem_Ref);
+        il.Emit(OpCodes.Stloc, arg);
+        il.Emit(OpCodes.Ldloc, arg);
+        il.Emit(OpCodes.Ldstr, prefix);
+        il.Emit(OpCodes.Callvirt, startsWith);
+        il.Emit(OpCodes.Brfalse, next);
+        il.Emit(OpCodes.Ldloc, arg);
+        il.Emit(OpCodes.Ldc_I4, prefix.Length);
+        il.Emit(OpCodes.Callvirt, substring);
+        il.Emit(OpCodes.Ret);
+        il.Append(next);
+        il.Emit(OpCodes.Ldc_I4_1);
+        il.Emit(OpCodes.Add);
+        il.Emit(OpCodes.Stloc, index);
+        il.Emit(OpCodes.Br, loop);
+        il.Append(none);
+        il.Emit(OpCodes.Ret);
+
+        var packet = module.GetType("CS.NetPacket");
+        var proxy = module.GetType("CS.ServerProxyManager");
+        var nick = new VariableDefinition(core.String);
+        var data = new VariableDefinition(packet);
+        var send = new MethodDefinition("SendLanNickname", MethodAttributes.Private, core.Void);
+        world.Methods.Add(send);
+        send.Body.Variables.Add(nick);
+        send.Body.Variables.Add(data);
+        il = send.Body.GetILProcessor();
+        var ret = il.Create(OpCodes.Ret);
+        il.Emit(OpCodes.Call, get);
+        il.Emit(OpCodes.Stloc, nick);
+        il.Emit(OpCodes.Ldloc, nick);
+        il.Emit(OpCodes.Brfalse, ret);
+        il.Emit(OpCodes.Ldloc, nick);
+        il.Emit(OpCodes.Callvirt, module.ImportReference(typeof(string).GetProperty("Length").GetGetMethod()));
+        il.Emit(OpCodes.Brfalse, ret);
+        il.Emit(OpCodes.Newobj, Method(packet, ".ctor"));
+        il.Emit(OpCodes.Stloc, data);
+        il.Emit(OpCodes.Ldloc, data);
+        il.Emit(OpCodes.Ldc_I4, 213);
+        il.Emit(OpCodes.Callvirt, Method(packet, "Push", "System.UInt16"));
+        il.Emit(OpCodes.Ldloc, data);
+        il.Emit(OpCodes.Ldloc, nick);
+        il.Emit(OpCodes.Callvirt, Method(packet, "Push", "System.String"));
+        il.Emit(OpCodes.Ldloc, data);
+        il.Emit(OpCodes.Callvirt, Method(packet, "UpdateHeader"));
+        il.Emit(OpCodes.Call, Method(proxy, "get_Instance"));
+        il.Emit(OpCodes.Callvirt, Method(proxy, "GetWorldServerProxy"));
+        il.Emit(OpCodes.Ldloc, data);
+        il.Emit(OpCodes.Callvirt, Method(module.GetType("CS.NetBuffer"), "get_Base"));
+        il.Emit(OpCodes.Callvirt, Method(module.GetType("CS.TcpPeer"), "Send", "System.Byte[]"));
+        il.Append(ret);
+
+        var login = Method(world, "HandleLogin", "System.IO.BinaryReader");
+        var ping = login.Body.Instructions.Single(i => i.OpCode == OpCodes.Call &&
+            ((MethodReference)i.Operand).Name == "SetPingEnabled");
+        Before(login.Body.GetILProcessor(), ping.Next,
+            login.Body.GetILProcessor().Create(OpCodes.Ldarg_0),
+            login.Body.GetILProcessor().Create(OpCodes.Call, send));
+    }
+
     private static void InstallVehiclePropImpact(ModuleDefinition module, TypeDefinition battle)
     {
         var handler = Method(battle, "HandleVehicleHitObstacle", "System.IO.BinaryReader");
@@ -939,21 +1186,37 @@ internal static class PatchCombat
             {
                 var battle = module.GetType("CS.Battle");
                 var unit = module.GetType("CS.Unit");
-                InstallHitReport(module, battle, unit);
-                InstallRevive(module, battle, unit);
-                InstallReviveBar(module, unit);
-                InstallMeleeSwing(module, battle, unit);
-                InstallSniperScope(module, unit);
-                InstallScopePose(module, battle, unit);
-                InstallRoundControls(module);
-                InstallInfiniteAmmo(module);
-                InstallRespawnMode(module);
-                InstallLanRoom(module, roomUi);
-                InstallItems(module, battle, unit);
-                InstallVehiclePropImpact(module, battle);
-                InstallEliminationNotices(module, battle, unit);
-                InstallProfileName(module);
-                module.Write(args[1]);
+                Console.WriteLine("step hit"); InstallHitReport(module, battle, unit);
+                Console.WriteLine("step revive"); InstallRevive(module, battle, unit);
+                Console.WriteLine("step bar"); InstallReviveBar(module, unit);
+                Console.WriteLine("step melee"); InstallMeleeSwing(module, battle, unit);
+                Console.WriteLine("step scope"); InstallSniperScope(module, unit);
+                Console.WriteLine("step pose"); InstallScopePose(module, battle, unit);
+                Console.WriteLine("step controls"); InstallRoundControls(module);
+                Console.WriteLine("step ammo"); InstallInfiniteAmmo(module);
+                Console.WriteLine("step mode"); InstallRespawnMode(module);
+                Console.WriteLine("step room"); InstallLanRoom(module, roomUi);
+                Console.WriteLine("step items"); InstallItems(module, battle, unit);
+                Console.WriteLine("step vehicle"); InstallVehiclePropImpact(module, battle);
+                Console.WriteLine("step notices"); InstallEliminationNotices(module, battle, unit);
+                Console.WriteLine("step profile"); InstallProfileName(module);
+                Console.WriteLine("step nickname"); InstallNickname(module);
+                try
+                {
+                    module.Write(args[1]);
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine("WRITE " + ex.GetType().FullName);
+                    Console.Error.WriteLine(ex.Message);
+                    Console.Error.WriteLine(ex.StackTrace);
+                    if (ex.InnerException != null)
+                    {
+                        Console.Error.WriteLine("INNER " + ex.InnerException.GetType().FullName);
+                        Console.Error.WriteLine(ex.InnerException.Message);
+                    }
+                    throw;
+                }
             }
         }
     }

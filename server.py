@@ -80,6 +80,8 @@ WHEEL_SWITCH = 208
 RESPAWN_MODE = 4
 ROOM_STATE = 210
 ROOM_START = 211
+LAST_WEAPON = 212
+NICKNAME = 213
 SCOPED_BULLET = 1 << 31
 PRIMARY_SLOT = 0
 MELEE_SLOT = 2
@@ -361,6 +363,7 @@ class Player:
     guns: list[EquippedGun] = field(init=False)
     reserve: dict[int, int] = field(init=False)
     slot: int = PRIMARY_SLOT
+    previous_slot: int = PRIMARY_SLOT
     firing: bool = False
     fired_during_operation: bool = False
     scoped: bool = False
@@ -382,6 +385,7 @@ class Player:
     skins: dict[tuple[int, int, int], int] = field(default_factory=dict)
 
     profile_name: str = ""
+    nickname: str = ""
     character: int = 1
 
     def __post_init__(self):
@@ -410,12 +414,14 @@ class Player:
             ammo_kind = weapon.gun.ammo_kind
             self.reserve[ammo_kind] = self.reserve.get(ammo_kind, 0) + 4 * weapon.gun.magazine
         self.slot = PRIMARY_SLOT
+        self.previous_slot = PRIMARY_SLOT
         self.fired_during_operation = False
         self.equip_ready_at = 0.0
         self.next_swing = 0.0
 
     def name(self):
-        return f"LAN Test {self.id}".encode("utf-16le").ljust(34, b"\0")
+        display = (self.nickname or f"LAN Test {self.id}")[:16]
+        return display.encode("utf-16le").ljust(34, b"\0")
 
     def profile(self, now):
         money_and_stats = struct.pack("<6q7I", now, 0, 0, 0, 0, 0, self.character, 0, 0, 0, 0, 0, 0)
@@ -441,8 +447,16 @@ class Player:
             return self.med_id()
         return self.weapon_id(self.slot)
 
+    def applied_skin(self, category, item):
+        """Item skins are shared by both characters; clothing stays per character."""
+        for character in (self.character, 1, 2):
+            skin = self.skins.get((character, category, item))
+            if skin is not None:
+                return skin
+        return None
+
     def gun_skin(self, weapon):
-        return weapon.skin if weapon.skin is not None else self.skins.get((self.character, 1, weapon.gun.kind))
+        return weapon.skin if weapon.skin is not None else self.applied_skin(1, weapon.gun.kind)
 
     def loadout(self):
         storage = []
@@ -450,9 +464,9 @@ class Player:
             if count:
                 storage.append(struct.pack("<IHII", self.id * 100 + kind, 7, kind, count))
         for kind in sorted(self.throwables):
-            storage.append(self.item(self.throwable_id(kind), 4, kind, self.skins.get((self.character, 3, kind))))
+            storage.append(self.item(self.throwable_id(kind), 4, kind, self.applied_skin(3, kind)))
         if self.medkits:
-            storage.append(self.item(self.med_id(), 5, FIRST_AID_KIND, self.skins.get((self.character, 4, FIRST_AID_KIND))))
+            storage.append(self.item(self.med_id(), 5, FIRST_AID_KIND, self.applied_skin(4, FIRST_AID_KIND)))
 
         weapons = bytearray(struct.pack("<H", 3))
         for slot, weapon in enumerate(self.guns):
@@ -460,7 +474,7 @@ class Player:
             weapons.extend(self.item(self.weapon_id(slot), 2, weapon.gun.kind, self.gun_skin(weapon)))
             weapons.extend(struct.pack("<IH", weapon.ammo, 0))
         weapons.extend(struct.pack("<H", MELEE_SLOT))
-        weapons.extend(self.item(self.weapon_id(MELEE_SLOT), 1, MACHETE_KIND, self.skins.get((self.character, 0, MACHETE_KIND))))
+        weapons.extend(self.item(self.weapon_id(MELEE_SLOT), 1, MACHETE_KIND, self.applied_skin(0, MACHETE_KIND)))
         outfit = self.outfit()
         return (struct.pack("<H", len(storage)) +
                 b"".join(struct.pack("<H", index) + item for index, item in enumerate(storage)) +
@@ -542,9 +556,9 @@ class Match(asyncio.DatagramProtocol):
         skin_offset = self.vehicle_skin_offset
         self.vehicles = {
             vehicle.id: vehicle for vehicle in (
-                Vehicle(101, 1 + skin_offset, 1.5, -1.0),
-                Vehicle(102, 2 + skin_offset, 28.0, -3.0),
-                Vehicle(103, 3 + skin_offset, -20.0, -3.0),
+                Vehicle(101, 1 + skin_offset, 12.0, -12.0),
+                Vehicle(102, 2 + skin_offset, -62.0, -8.0),
+                Vehicle(103, 3 + skin_offset, 79.0, -3.0),
             )
         }
         self.bullet_id = 0
@@ -582,6 +596,7 @@ class Match(asyncio.DatagramProtocol):
     def save_profile(self, player):
         self.saved_profiles[player.profile_name] = {
             "character": player.character,
+            "nickname": player.nickname,
             "skins": [[*key, value] for key, value in sorted(player.skins.items())],
         }
         temporary = self.profile_path.with_suffix(".tmp")
@@ -608,6 +623,7 @@ class Match(asyncio.DatagramProtocol):
             raise ValueError("Choose a different -lan-profile for each client.")
         saved = self.saved_profiles.get(player.profile_name, {})
         player.character = saved.get("character", 1)
+        player.nickname = saved.get("nickname", "")
         player.skins = {
             (character, category, kind): skin
             for character, category, kind, skin in saved.get("skins", ())
@@ -709,6 +725,14 @@ class Match(asyncio.DatagramProtocol):
                         player.skins[key] = skin
                     self.save_profile(player)
                     await send(writer, SKIN_APPLY, payload)
+            elif message == NICKNAME and len(payload) >= 2:
+                size, = struct.unpack_from("<H", payload, 0)
+                if 2 <= size <= 32 and len(payload) >= 2 + size:
+                    name = payload[2:2 + size].decode("utf-16le", errors="replace").strip()
+                    if name and not any(ord(ch) < 32 for ch in name):
+                        player.nickname = name[:16]
+                        self.save_profile(player)
+                        print(f"nickname: player {player.id} -> {player.nickname}", flush=True)
             elif message == 27 and payload == struct.pack("<H", RESPAWN_MODE) and not self.queued:
                 player.room_ready = not player.room_ready
                 self.send_room_state()
@@ -807,6 +831,10 @@ class Match(asyncio.DatagramProtocol):
             return
         if player.revive_at:
             return
+        if message == LAST_WEAPON and not payload and player.vehicle is None:
+            if player.previous_slot <= MELEE_SLOT and player.previous_slot != player.slot:
+                self.switch(player, player.previous_slot, time.monotonic())
+            return
         if message == WHEEL_SWITCH and payload in (b"\x00", b"\x01") and player.vehicle is None:
             forward = payload == b"\x01"
             current = player.slot if player.slot <= MELEE_SLOT else (-1 if forward else 0)
@@ -830,6 +858,10 @@ class Match(asyncio.DatagramProtocol):
         elif message in (OPERATE, STOP_OPERATE) and len(payload) == 20 and player.vehicle is None:
             status = struct.unpack("<5f", payload)
             if all(map(math.isfinite, status)):
+                if player.scoped:
+                    # Sniping is stationary: keep the last ground position but
+                    # still allow the player to turn and aim.
+                    status = (player.status[0], player.status[1], player.status[2], status[3], status[4])
                 player.status = status
                 now = time.monotonic()
                 if player.slot == THROWABLE_SLOT:
@@ -920,6 +952,8 @@ class Match(asyncio.DatagramProtocol):
             self.set_scope(player, False)
         self.cancel_reload(player)
         self.cancel_item(player)
+        if slot != player.slot and player.slot <= MELEE_SLOT:
+            player.previous_slot = player.slot
         player.slot = slot
         player.firing = False
         player.fired_during_operation = False
@@ -1038,7 +1072,7 @@ class Match(asyncio.DatagramProtocol):
         self.broadcast(VEHICLE_EXPLODE, struct.pack("<I", vehicle.id))
         _, radius, _, _ = vehicle.spec
         for target in self.joined:
-            if not self.can_damage(target, now):
+            if target is shooter or not self.can_damage(target, now):
                 continue
             tx, ty, tz = target.status[:3]
             if target.vehicle is not None:
@@ -1063,8 +1097,30 @@ class Match(asyncio.DatagramProtocol):
             midpoint = vehicle.footprint((vehicle.x + previous_x) / 2, (vehicle.z + previous_z) / 2, vehicle.yaw)
             for door, bounds in DOOR_BOUNDS.items():
                 if door not in self.open_doors and any(vehicle.overlaps_wall(pose, bounds) for pose in (midpoint, footprint)):
+                    # A car should knock the door leaf away, not play the normal
+                    # open animation. Reuse the door's destroyable group when it
+                    # has one, and only fall back to opening when it does not.
+                    door_center = ((bounds[0] + bounds[2]) / 2, (bounds[1] + bounds[3]) / 2)
+                    blast = min(
+                        self.blast_doors.items(),
+                        key=lambda entry: math.dist(
+                            ((entry[1][1][0] + entry[1][1][2]) / 2, (entry[1][1][1] + entry[1][1][3]) / 2),
+                            door_center,
+                        ),
+                        default=None,
+                    )
+                    if blast is not None and math.dist(
+                        ((blast[1][1][0] + blast[1][1][2]) / 2, (blast[1][1][1] + blast[1][1][3]) / 2),
+                        door_center,
+                    ) < 3:
+                        prop_id, (health, _) = blast
+                        del self.blast_doors[prop_id]
+                        self.broadcast(VEHICLE_HIT_OBSTACLE, struct.pack(
+                            "<II4f", vehicle.id, prop_id, previous_x, 15.0, previous_z, health,
+                        ))
+                    else:
+                        self.broadcast(OPEN_DOOR, struct.pack("<II", driver.id, door))
                     self.open_doors.add(door)
-                    self.broadcast(OPEN_DOOR, struct.pack("<II", driver.id, door))
             for prop_id, (health, bounds) in list(self.movable_props.items()):
                 if any(vehicle.overlaps_wall(pose, bounds) for pose in (midpoint, footprint)):
                     del self.movable_props[prop_id]
@@ -1261,6 +1317,8 @@ class Match(asyncio.DatagramProtocol):
                 and not target.revive_at and now >= target.protected_until)
 
     def apply_damage(self, shooter, target, damage, now):
+        if shooter is target or damage <= 0:
+            return
         target.health = max(0.0, target.health - damage)
         print(f"hit: player {shooter.id} -> {target.id}, health {target.health:g}", flush=True)
         if not target.health:
@@ -1319,7 +1377,8 @@ class Match(asyncio.DatagramProtocol):
         bullets = bytearray(struct.pack("<IH", player.id, gun.pellets))
         for _ in range(gun.pellets):
             self.bullet_id += 1
-            bullet_id = self.bullet_id | SCOPED_BULLET if scoped else self.bullet_id
+            # Every sniper bullet uses the white sniper tracer, scoped or not.
+            bullet_id = self.bullet_id | SCOPED_BULLET if tuning else self.bullet_id
             if tuning:
                 # APK Unit.FireBullet rotates the cone offset around the forward axis.
                 offset = math.tan(math.radians(uniform(0, cone)))

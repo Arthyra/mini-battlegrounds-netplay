@@ -31,10 +31,10 @@ for obj in level.objects.values():
             obstacle_ids[path_id] = struct.unpack_from("<I", obj.get_raw_data(), 32)[0]
         elif script == "ObstacleGroupMarker":
             # Native DestroyableMarker fields: ID, visual reference, flags, health.
-            _, flags, health = struct.unpack_from("<I12xIf", obj.get_raw_data(), 32)
+            marker_id, flags, health = struct.unpack_from("<I12xIf", obj.get_raw_data(), 32)
             name = marker.m_GameObject.deref().peek_name()
-            if flags & 1 and health > 0 and name.startswith("CS_Props_Bike_"):
-                movable_groups[path_id] = health
+            if flags & 1 and health > 0:
+                movable_groups[path_id] = (health, marker_id)
 
 def vec(value):
     return np.array([value.x, value.y, value.z])
@@ -82,7 +82,8 @@ for obj in level.objects.values():
         door_id = box.m_GameObject.m_PathID
         doors.append((obstacle_ids[door_id], door_objects[door_id], bounds))
     elif parent_id in movable_groups:
-        props.append((obstacle_ids[box.m_GameObject.m_PathID], movable_groups[parent_id], bounds))
+        health, group_id = movable_groups[parent_id]
+        props.append((group_id, health, bounds))
     else:
         boxes.append((name, bounds))
 (root / "map102-vehicle-obstacles.json").write_text(
