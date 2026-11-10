@@ -437,9 +437,15 @@ internal sealed class LanLauncher : Form
         var updater = Path.Combine(Path.GetTempPath(), "mbg-updater-" + Guid.NewGuid().ToString("N") + ".exe");
         File.Copy(updaterSource, updater, true);
         var launcherName = Path.GetFileName(Application.ExecutablePath);
-        var arguments = "--source \"" + staging + "\" --root \"" + root + "\" --pid " +
-            Process.GetCurrentProcess().Id + " --launch \"" + launcherName + "\"";
-        Process.Start(new ProcessStartInfo(updater, arguments)
+        var job = Path.Combine(root, "update-job.txt");
+        File.WriteAllLines(job, new[]
+        {
+            staging,
+            root,
+            Process.GetCurrentProcess().Id.ToString(),
+            launcherName,
+        }, new UTF8Encoding(false));
+        Process.Start(new ProcessStartInfo(updater)
         {
             WorkingDirectory = root,
             UseShellExecute = true
