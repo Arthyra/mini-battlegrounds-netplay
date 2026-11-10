@@ -114,8 +114,8 @@ public sealed class LanRoomUI : MonoBehaviour
         var renameRect = (RectTransform)rename.transform;
         renameRect.anchorMin = renameRect.anchorMax = new Vector2(0, 0);
         renameRect.pivot = new Vector2(0, 0);
-        renameRect.anchoredPosition = new Vector2(24, 150);
-        renameRect.sizeDelta = new Vector2(96, 34);
+        renameRect.anchoredPosition = new Vector2(24, 165);
+        renameRect.sizeDelta = new Vector2(170, 48);
         var oldRenameText = rename.transform.Find("Text");
         if (oldRenameText != null)
         {
@@ -133,7 +133,7 @@ public sealed class LanRoomUI : MonoBehaviour
         renameLabelRect.offsetMax = Vector2.zero;
         renameLabel.text = "\u6539\u540d";
         renameLabel.font = label.font;
-        renameLabel.fontSize = 20;
+        renameLabel.fontSize = 24;
         renameLabel.color = label.color;
         renameLabel.alignment = TextAnchor.MiddleCenter;
         renameLabel.raycastTarget = false;
@@ -172,7 +172,8 @@ public sealed class LanRoomUI : MonoBehaviour
         view.Update();
         var scoreboard = new GameObject("LanScoreboard");
         DontDestroyOnLoad(scoreboard);
-        scoreboard.AddComponent<LanScoreboard>();
+        var scoreboardView = scoreboard.AddComponent<LanScoreboard>();
+        scoreboardView.SetFont(label.font);
     }
 
     private void Update()
@@ -290,6 +291,8 @@ public sealed class LanRoomUI : MonoBehaviour
         }
     }
 }
+
+
 
 
 
