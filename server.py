@@ -1098,6 +1098,7 @@ class Match(asyncio.DatagramProtocol):
                     if scoped:
                         weapon.drift = max(weapon.drift, tuning.scoped_minimum)
             player.scoped = scoped
+            print(f"scope: player {player.id} {scoped}", flush=True)
             self.broadcast(SCOPE_POSE, struct.pack("<I?", player.id, scoped))
 
     def start_first_aid(self, player, now):
