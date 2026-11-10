@@ -5,6 +5,8 @@ using System.Drawing;
 using System.IO;
 using System.Net;
 using System.Net.Sockets;
+using System.IO.Compression;
+using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -65,7 +67,11 @@ internal sealed class LanLauncher : Form
             if (configured.Length > 0)
                 address.Text = configured;
         }
-        Shown += async (sender, args) => await FindAndShow(true);
+        Shown += async (sender, args) =>
+        {
+            await FindAndShow(true);
+            await CheckForUpdate();
+        };
         search.Click += async (sender, args) => await FindAndShow(false);
         join.Click += (sender, args) => JoinSelected();
     }
@@ -133,6 +139,170 @@ internal sealed class LanLauncher : Form
         }
         if (StartGame(host, profile))
             Close();
+    }
+
+    private sealed class UpdateInfo
+    {
+        public string Version;
+        public string Url;
+        public string Sha256;
+    }
+
+    private static readonly string VersionFile = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "version.txt");
+    private const string UpdateUrl = "http://198.51.100.10:8080/update/latest.json";
+
+    private async Task CheckForUpdate()
+    {
+        UpdateInfo latest;
+        try
+        {
+            latest = await Task.Run(() => FetchUpdate());
+        }
+        catch
+        {
+            return;
+        }
+        if (latest == null || !IsNewer(latest.Version, LocalVersion()))
+            return;
+        if (MessageBox.Show(
+                "发现新版本 v" + latest.Version + "（当前 v" + LocalVersion() + "）。\n是否现在从 ECS 下载并自动更新？",
+                "Mini Battlegrounds", MessageBoxButtons.YesNo, MessageBoxIcon.Information) != DialogResult.Yes)
+            return;
+
+        Cursor.Current = Cursors.WaitCursor;
+        string error = null;
+        try
+        {
+            await Task.Run(() => ApplyUpdate(latest));
+        }
+        catch (Exception exception)
+        {
+            error = exception.Message;
+        }
+        finally
+        {
+            Cursor.Current = Cursors.Default;
+        }
+        if (error != null)
+        {
+            MessageBox.Show("自动更新失败：\n" + error, "Mini Battlegrounds");
+            return;
+        }
+        MessageBox.Show("更新完成，正在启动新版本。", "Mini Battlegrounds");
+        Close();
+        Process.Start(new ProcessStartInfo(Application.ExecutablePath)
+        {
+            WorkingDirectory = AppDomain.CurrentDomain.BaseDirectory
+        });
+    }
+
+    private static UpdateInfo FetchUpdate()
+    {
+        using (var client = new WebClient())
+        {
+            client.Encoding = Encoding.UTF8;
+            var json = client.DownloadString(UpdateUrl);
+            return new UpdateInfo
+            {
+                Version = JsonValue(json, "version"),
+                Url = JsonValue(json, "url"),
+                Sha256 = JsonValue(json, "sha256"),
+            };
+        }
+    }
+
+    private static void ApplyUpdate(UpdateInfo latest)
+    {
+        if (string.IsNullOrWhiteSpace(latest.Url))
+            throw new InvalidOperationException("更新地址为空。");
+        var temporary = Path.Combine(Path.GetTempPath(), "mbg-update-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(temporary);
+        try
+        {
+            var archive = Path.Combine(temporary, "update.zip");
+            using (var client = new WebClient())
+                client.DownloadFile(latest.Url, archive);
+            if (!string.IsNullOrEmpty(latest.Sha256))
+            {
+                using (var sha = SHA256.Create())
+                using (var stream = File.OpenRead(archive))
+                {
+                    var actual = BitConverter.ToString(sha.ComputeHash(stream)).Replace("-", "").ToLowerInvariant();
+                    if (actual != latest.Sha256.ToLowerInvariant())
+                        throw new InvalidDataException("更新包校验失败。");
+                }
+            }
+            var extracted = Path.Combine(temporary, "extract");
+            ZipFile.ExtractToDirectory(archive, extracted);
+            var newClient = Path.Combine(extracted, "client");
+            if (!Directory.Exists(newClient))
+                throw new InvalidDataException("更新包缺少 client 目录。");
+            CopyDirectory(newClient, Client);
+            var root = AppDomain.CurrentDomain.BaseDirectory;
+            foreach (var name in new[] { "README.txt", "server.txt", "version.txt" })
+            {
+                var source = Path.Combine(extracted, name);
+                if (File.Exists(source))
+                    File.Copy(source, Path.Combine(root, name), true);
+            }
+        }
+        finally
+        {
+            try
+            {
+                Directory.Delete(temporary, true);
+            }
+            catch
+            {
+            }
+        }
+    }
+
+    private static void CopyDirectory(string source, string destination)
+    {
+        Directory.CreateDirectory(destination);
+        foreach (var file in Directory.GetFiles(source))
+            File.Copy(file, Path.Combine(destination, Path.GetFileName(file)), true);
+        foreach (var directory in Directory.GetDirectories(source))
+            CopyDirectory(directory, Path.Combine(destination, Path.GetFileName(directory)));
+    }
+
+    private static string LocalVersion()
+    {
+        try
+        {
+            var text = File.ReadAllText(VersionFile).Trim();
+            return text.Length > 0 ? text : "0.0";
+        }
+        catch
+        {
+            return "0.0";
+        }
+    }
+
+    private static bool IsNewer(string remote, string local)
+    {
+        Version remoteVersion, localVersion;
+        if (!Version.TryParse(remote, out remoteVersion))
+            return false;
+        if (!Version.TryParse(local, out localVersion))
+            localVersion = new Version(0, 0);
+        return remoteVersion > localVersion;
+    }
+
+    private static string JsonValue(string json, string key)
+    {
+        var keyIndex = json.IndexOf("\"" + key + "\"", StringComparison.Ordinal);
+        if (keyIndex < 0)
+            return "";
+        var colon = json.IndexOf(':', keyIndex);
+        if (colon < 0)
+            return "";
+        var quote = json.IndexOf('"', colon + 1);
+        if (quote < 0)
+            return "";
+        var end = json.IndexOf('"', quote + 1);
+        return end < 0 ? "" : json.Substring(quote + 1, end - quote - 1);
     }
 
     private static bool TryHost(string text, out string host)
@@ -226,3 +396,4 @@ internal sealed class LanLauncher : Form
         }
     }
 }
+

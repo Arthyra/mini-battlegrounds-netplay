@@ -21,7 +21,7 @@ GUIDE = """Mini Battlegrounds LAN · 102 复活模式
 """
 
 
-def build(output, client, host=None):
+def build(output, client, host=None, version=None):
     output = output.resolve()
     if output.suffix.lower() != ".zip" or output.exists():
         raise ValueError("Choose a new .zip output path.")
@@ -33,11 +33,14 @@ def build(output, client, host=None):
     with TemporaryDirectory(prefix="mbg-player-build-") as temporary:
         stage = Path(temporary)
         subprocess.run([str(csc), "/nologo", "/target:winexe", "/reference:System.Windows.Forms.dll",
-                        "/reference:System.Drawing.dll", f"/out:{stage / 'Start Game.exe'}",
+                        "/reference:System.Drawing.dll",
+                        "/reference:System.IO.Compression.FileSystem.dll", f"/out:{stage / 'Start Game.exe'}",
                         str(ROOT / "lan-launcher.cs")], check=True)
         copy_runtime(stage / "client", client)
         if host:
             (stage / "server.txt").write_text(str(host) + "\n", encoding="ascii")
+        if version:
+            (stage / "version.txt").write_text(str(version) + "\n", encoding="ascii")
         (stage / "README.txt").write_text(GUIDE, encoding="utf-8-sig")
         archive = Path(shutil.make_archive(str(stage.parent / stage.name) + "-client", "zip", stage))
         try:
@@ -51,5 +54,8 @@ if __name__ == "__main__":
     parser.add_argument("output", type=Path)
     parser.add_argument("--client", default=SOURCE, type=Path, help="prepared client directory")
     parser.add_argument("--host", help="host IP pre-filled in the launcher's server.txt")
+    parser.add_argument("--version", help="version written into version.txt")
     args = parser.parse_args()
-    build(args.output, args.client, args.host)
+    build(args.output, args.client, args.host, args.version)
+
+

@@ -52,7 +52,7 @@ def main():
     archive = args.output / "Mini-Battlegrounds-LAN-Windows.zip"
     if archive.exists():
         archive.unlink()
-    build(archive, args.client, args.host)
+    build(archive, args.client, args.host, args.version)
 
     manifest = {
         "version": args.version,
@@ -67,7 +67,23 @@ def main():
     }
     manifest_path = args.output / f"release-v{args.version}.json"
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+
+    update_dir = args.output / "update"
+    update_dir.mkdir(parents=True, exist_ok=True)
+    update_archive = update_dir / archive.name
+    if update_archive.exists():
+        update_archive.unlink()
+    update_archive.write_bytes(archive.read_bytes())
+    latest = {
+        "version": args.version,
+        "tag": manifest["tag"],
+        "url": f"http://{args.host}:8080/update/{archive.name}",
+        "bytes": manifest["bytes"],
+        "sha256": manifest["sha256"],
+    }
+    (update_dir / "latest.json").write_text(json.dumps(latest, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(manifest, indent=2))
+    print(json.dumps(latest, indent=2))
 
     if args.publish:
         notes = args.notes or ROOT / f"release-notes-v{args.version}.md"

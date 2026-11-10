@@ -15,4 +15,5 @@
 !/build-friend-zip.py
 !/build-release.py
 !/test-public-battle.py
+!/admin_server.py
 

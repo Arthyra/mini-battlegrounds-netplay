@@ -6,10 +6,11 @@ from dataclasses import dataclass, field
 import ipaddress
 import json
 import math
+import os
 import re
 from pathlib import Path
 from random import choice, uniform
-from secrets import randbits
+from secrets import randbits, token_hex
 import struct
 import time
 import unicodedata
@@ -22,6 +23,8 @@ BATTLE_PORT = 43134
 BATTLE_UDP_PORT = 43135
 BATTLE_ID = 1
 BATTLE_LOAD_TIMEOUT = 90.0
+ROUND_TIME = float(os.environ.get("MBG_ROUND_TIME", "300"))
+ROUND_END_DELAY = float(os.environ.get("MBG_ROUND_END_DELAY", "8"))
 RECONNECT_GRACE = 30.0
 WORLD_ID = 1
 LAN_VERSION = "lan-v4"
@@ -81,6 +84,8 @@ SCOPE_POSE = 207
 WHEEL_SWITCH = 208
 RESPAWN_MODE = 4
 ROOM_STATE = 210
+BATTLE_END = 41
+BATTLE_CLOSE = 43
 ROOM_START = 211
 LAST_WEAPON = 212
 NICKNAME = 213
@@ -555,6 +560,8 @@ class Match(asyncio.DatagramProtocol):
         self.joined = []
         self.started = False
         self.loading_deadline = 0.0
+        self.round_started = 0.0
+        self.round_ending = False
         self.forwarded = set()
         self.open_doors = set()
         skin_offset = self.vehicle_skin_offset
@@ -605,6 +612,54 @@ class Match(asyncio.DatagramProtocol):
             if member.battle is not None:
                 member.battle.write(packet)
         print(f"battle left: player {player.id}", flush=True)
+
+    def admin_status(self):
+        return {
+            "started": self.started,
+            "battle_id": self.battle_id,
+            "size": self.size,
+            "owner": self.owner.id if self.owner else None,
+            "players": [
+                {
+                    "id": player.id,
+                    "name": player.nickname or f"LAN Test {player.id}",
+                    "owner": player is self.owner,
+                    "ready": player.room_ready,
+                    "battle": player.battle is not None,
+                    "disconnected": bool(player.disconnected_at),
+                }
+                for player in self.lobby_members()
+            ],
+        }
+
+    def admin_reset(self):
+        self.finish_round("admin reset")
+        return True
+
+    def admin_kick(self, player_id):
+        player = self.players.get(player_id)
+        if player is None:
+            return False
+        if player.battle is not None:
+            player.battle.close()
+        if player.world is not None:
+            player.world.close()
+        if player in self.joined:
+            if player.vehicle:
+                self.unmount(player)
+            self.player_left(player)
+        if self.players.get(player.id) is player and not self.queued:
+            self.release_lobby_slot(player)
+        self.send_room_state()
+        return True
+
+    def admin_logs(self):
+        path = Path(__file__).resolve().parent / "server.log"
+        try:
+            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError as error:
+            return f"cannot read log: {error}"
+        return "\n".join(lines[-200:])
 
     @staticmethod
     def skin_applies(player):
@@ -847,6 +902,7 @@ class Match(asyncio.DatagramProtocol):
                         for equipped in self.joined
                     )
                     self.started = True
+                    self.round_started = time.monotonic()
                     for member in self.joined:
                         member.battle.write(initial_state)
             elif self.started:
@@ -1525,6 +1581,15 @@ class Match(asyncio.DatagramProtocol):
                 if self.queued and now >= self.loading_deadline:
                     self.finish_round("loading timed out")
                 continue
+            if self.round_started and now - self.round_started >= ROUND_TIME:
+                if not self.round_ending:
+                    self.round_ending = True
+                    self.broadcast(BATTLE_END, b"")
+                    print(f"round {self.battle_id} time limit; result shown", flush=True)
+                if now - self.round_started >= ROUND_TIME + ROUND_END_DELAY:
+                    self.broadcast(BATTLE_CLOSE, b"")
+                    self.finish_round("5 minute time limit")
+                    continue
             for player in list(self.joined):
                 if player.disconnected_at and now - player.disconnected_at >= RECONNECT_GRACE:
                     if player.vehicle:
@@ -1634,7 +1699,9 @@ class LanDiscovery(asyncio.DatagramProtocol):
             self.transport.sendto(b"MBG-LAN-ROOM-1 " + self.host.encode("ascii"), addr)
 
 
-async def main(host, bind, size, stock_vehicles=False, share=False, owner_profile=None):
+async def main(host, bind, size, stock_vehicles=False, share=False, owner_profile=None,
+               admin_port=8080, admin_token=None):
+    root = Path(__file__).resolve().parent
     match = Match(host, size, stock_vehicles, owner_profile)
     async with (
         await asyncio.start_server(handler(match.login), bind, LOGIN_PORT),
@@ -1644,6 +1711,30 @@ async def main(host, bind, size, stock_vehicles=False, share=False, owner_profil
         udp, _ = await asyncio.get_running_loop().create_datagram_endpoint(
             lambda: match, local_addr=(bind, BATTLE_UDP_PORT)
         )
+        admin = None
+        admin_server = None
+        if admin_port:
+            token = admin_token or os.environ.get("MBG_ADMIN_TOKEN")
+            token_file = root / "admin-token"
+            if not token:
+                try:
+                    token = token_file.read_text(encoding="ascii").strip()
+                except OSError:
+                    token = ""
+            if not token:
+                token = token_hex(16)
+                token_file.write_text(token + "\n", encoding="ascii")
+                try:
+                    token_file.chmod(0o600)
+                except OSError:
+                    pass
+            from admin_server import AdminServer
+            admin = AdminServer(match, admin_port, token, root)
+            try:
+                admin_server = await admin.start()
+                print(f"Admin/update UI on 0.0.0.0:{admin_port}", flush=True)
+            except OSError as error:
+                print(f"Admin UI unavailable on {admin_port}: {error}", flush=True)
         discovery = None
         try:
             if bind != "0.0.0.0" and not ipaddress.IPv4Address(bind).is_loopback:
@@ -1661,6 +1752,9 @@ async def main(host, bind, size, stock_vehicles=False, share=False, owner_profil
         finally:
             if discovery is not None:
                 discovery.close()
+            if admin_server is not None:
+                admin_server.close()
+                await admin_server.wait_closed()
             udp.close()
 
 
@@ -1672,6 +1766,8 @@ if __name__ == "__main__":
     parser.add_argument("--share-client", action="store_true", help="prepare a LAN download and open the host client")
     parser.add_argument("--stock-vehicles", action="store_true", help="Use the three stock vehicle appearances")
     parser.add_argument("--owner-profile", help="profile name that always owns the room (for example slot-1)")
+    parser.add_argument("--admin-port", type=int, default=8080, help="token-protected admin/update UI port (0 disables)")
+    parser.add_argument("--admin-token", help="admin token; defaults to MBG_ADMIN_TOKEN or admin-token file")
     args = parser.parse_args()
     if args.host is None:
         if args.share_client:
@@ -1691,6 +1787,12 @@ if __name__ == "__main__":
     if args.share_client and not (args.host.is_private or args.host.is_loopback):
         parser.error("--share-client is for LAN hosts; use a public client prepared separately")
     try:
-        asyncio.run(main(str(args.host), str(args.bind), args.players, args.stock_vehicles, args.share_client, args.owner_profile))
+        asyncio.run(main(str(args.host), str(args.bind), args.players, args.stock_vehicles, args.share_client,
+                          args.owner_profile, args.admin_port, args.admin_token))
     except KeyboardInterrupt:
         pass
+
+
+
+
+
