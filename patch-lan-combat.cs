@@ -1058,6 +1058,38 @@ internal static class PatchCombat
         il.Emit(OpCodes.Callvirt, Method(module.GetType("CS.TcpPeer"), "Send", "System.Byte[]"));
         il.Append(ret);
 
+        // LanRoomUI calls this through reflection after the player edits the
+        // name in the lobby; the server saves it and re-sends profile 117.
+        var sendValue = new MethodDefinition("SendLanNicknameValue",
+            MethodAttributes.Public | MethodAttributes.Static, core.Void);
+        sendValue.Parameters.Add(new ParameterDefinition("name", ParameterAttributes.None, core.String));
+        world.Methods.Add(sendValue);
+        var valueData = new VariableDefinition(packet);
+        sendValue.Body.Variables.Add(valueData);
+        var valueIl = sendValue.Body.GetILProcessor();
+        var valueRet = valueIl.Create(OpCodes.Ret);
+        valueIl.Emit(OpCodes.Ldarg_0);
+        valueIl.Emit(OpCodes.Brfalse, valueRet);
+        valueIl.Emit(OpCodes.Ldarg_0);
+        valueIl.Emit(OpCodes.Callvirt, module.ImportReference(typeof(string).GetProperty("Length").GetGetMethod()));
+        valueIl.Emit(OpCodes.Brfalse, valueRet);
+        valueIl.Emit(OpCodes.Newobj, Method(packet, ".ctor"));
+        valueIl.Emit(OpCodes.Stloc, valueData);
+        valueIl.Emit(OpCodes.Ldloc, valueData);
+        valueIl.Emit(OpCodes.Ldc_I4, 213);
+        valueIl.Emit(OpCodes.Callvirt, Method(packet, "Push", "System.UInt16"));
+        valueIl.Emit(OpCodes.Ldloc, valueData);
+        valueIl.Emit(OpCodes.Ldarg_0);
+        valueIl.Emit(OpCodes.Callvirt, Method(packet, "Push", "System.String"));
+        valueIl.Emit(OpCodes.Ldloc, valueData);
+        valueIl.Emit(OpCodes.Callvirt, Method(packet, "UpdateHeader"));
+        valueIl.Emit(OpCodes.Call, Method(proxy, "get_Instance"));
+        valueIl.Emit(OpCodes.Callvirt, Method(proxy, "GetWorldServerProxy"));
+        valueIl.Emit(OpCodes.Ldloc, valueData);
+        valueIl.Emit(OpCodes.Callvirt, Method(module.GetType("CS.NetBuffer"), "get_Base"));
+        valueIl.Emit(OpCodes.Callvirt, Method(module.GetType("CS.TcpPeer"), "Send", "System.Byte[]"));
+        valueIl.Append(valueRet);
+
         var login = Method(world, "HandleLogin", "System.IO.BinaryReader");
         var ping = login.Body.Instructions.Single(i => i.OpCode == OpCodes.Call &&
             ((MethodReference)i.Operand).Name == "SetPingEnabled");

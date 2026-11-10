@@ -20,8 +20,6 @@ internal sealed class LanLauncher : Form
     private readonly Button join = new Button();
     private readonly Button search = new Button();
     private readonly Label status = new Label();
-    private readonly Label nickLabel = new Label();
-    private readonly TextBox nickname = new TextBox();
     private readonly string profile;
 
     [STAThread]
@@ -32,10 +30,10 @@ internal sealed class LanLauncher : Form
         if (args.Length == 2 && args[0] == "--host")
         {
             string host;
-            string savedProfile, savedNickname;
-            LoadSettings(out savedProfile, out savedNickname);
+            string savedProfile;
+            LoadSettings(out savedProfile);
             if (TryHost(args[1], out host))
-                StartGame(host, savedProfile, savedNickname);
+                StartGame(host, savedProfile);
             else
                 MessageBox.Show("\u8bf7\u8f93\u5165\u6709\u6548\u7684 IPv4 \u5730\u5740\u3002");
             return;
@@ -45,26 +43,21 @@ internal sealed class LanLauncher : Form
 
     private LanLauncher()
     {
-        string savedNickname;
-        LoadSettings(out profile, out savedNickname);
+        LoadSettings(out profile);
+        SaveSettings(profile);
         Text = "Mini Battlegrounds LAN";
-        ClientSize = new Size(460, 185);
+        ClientSize = new Size(460, 150);
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
 
         status.SetBounds(15, 15, 430, 40);
-        nickLabel.SetBounds(15, 60, 55, 26);
-        nickLabel.Text = "\u6635\u79f0";
-        nickname.SetBounds(75, 60, 370, 26);
-        nickname.MaxLength = 16;
-        nickname.Text = savedNickname;
-        address.SetBounds(15, 95, 430, 26);
-        search.SetBounds(15, 133, 110, 28);
+        address.SetBounds(15, 60, 430, 26);
+        search.SetBounds(15, 103, 110, 28);
         search.Text = "\u641c\u7d22\u5c40\u57df\u7f51";
-        join.SetBounds(320, 133, 125, 28);
+        join.SetBounds(320, 103, 125, 28);
         join.Text = "\u52a0\u5165\u623f\u95f4";
-        Controls.AddRange(new Control[] { status, nickLabel, nickname, address, search, join });
+        Controls.AddRange(new Control[] { status, address, search, join });
         AcceptButton = join;
         if (File.Exists(ServerFile))
         {
@@ -138,9 +131,7 @@ internal sealed class LanLauncher : Form
             status.Text = "\u8bf7\u8f93\u5165\u623f\u4e3b\u7684 IPv4 \u5730\u5740\u6216\u9080\u8bf7\u94fe\u63a5\u3002";
             return;
         }
-        nickname.Text = nickname.Text.Trim();
-        SaveSettings();
-        if (StartGame(host, profile, nickname.Text))
+        if (StartGame(host, profile))
             Close();
     }
 
@@ -162,7 +153,7 @@ internal sealed class LanLauncher : Form
         return false;
     }
 
-    private static bool StartGame(string host, string profile, string nickname)
+    private static bool StartGame(string host, string profile)
     {
         var executable = Path.Combine(Client, "CrazyShooter.exe");
         if (!File.Exists(executable))
@@ -171,9 +162,6 @@ internal sealed class LanLauncher : Form
             return false;
         }
         var arguments = "-screen-fullscreen 0 -lan-host=" + host + " -lan-profile=" + profile;
-        var safeNickname = (nickname ?? "").Replace("\"", "").Trim();
-        if (safeNickname.Length > 0)
-            arguments += " -lan-name=\"" + safeNickname + "\"";
         try
         {
             Process.Start(new ProcessStartInfo(executable, arguments)
@@ -189,10 +177,9 @@ internal sealed class LanLauncher : Form
         }
     }
 
-    private static void LoadSettings(out string profile, out string nickname)
+    private static void LoadSettings(out string profile)
     {
         profile = null;
-        nickname = null;
         try
         {
             if (File.Exists(Settings))
@@ -202,12 +189,8 @@ internal sealed class LanLauncher : Form
                     var split = line.IndexOf('=');
                     if (split <= 0)
                         continue;
-                    var key = line.Substring(0, split).Trim();
-                    var value = line.Substring(split + 1).Trim();
-                    if (key == "profile")
-                        profile = value;
-                    else if (key == "nickname")
-                        nickname = value;
+                    if (line.Substring(0, split).Trim() == "profile")
+                        profile = line.Substring(split + 1).Trim();
                 }
             }
         }
@@ -216,8 +199,6 @@ internal sealed class LanLauncher : Form
         }
         if (string.IsNullOrWhiteSpace(profile))
             profile = DefaultProfile();
-        if (string.IsNullOrWhiteSpace(nickname))
-            nickname = "\u73a9\u5bb6" + new Random().Next(1000, 10000);
     }
 
     private static string DefaultProfile()
@@ -234,14 +215,11 @@ internal sealed class LanLauncher : Form
         return value.Length > 32 ? value.Substring(0, 32) : value;
     }
 
-    private void SaveSettings()
+    private static void SaveSettings(string profile)
     {
         try
         {
-            File.WriteAllText(Settings,
-                "profile=" + profile + Environment.NewLine +
-                "nickname=" + nickname.Text.Trim() + Environment.NewLine,
-                new UTF8Encoding(true));
+            File.WriteAllText(Settings, "profile=" + profile + Environment.NewLine, new UTF8Encoding(true));
         }
         catch (IOException)
         {

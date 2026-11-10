@@ -731,6 +731,7 @@ class Match(asyncio.DatagramProtocol):
                     if name and not any(ord(ch) < 32 for ch in name):
                         player.nickname = name[:16]
                         self.save_profile(player)
+                        await send(writer, 117, struct.pack("<H", 0) + player.profile(int(time.time())))
                         print(f"nickname: player {player.id} -> {player.nickname}", flush=True)
             elif message == 27 and payload == struct.pack("<H", RESPAWN_MODE) and not self.queued:
                 player.room_ready = not player.room_ready

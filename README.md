@@ -44,7 +44,7 @@ Start-Process .\client\CrazyShooter.exe -WorkingDirectory .\client -ArgumentList
 Start-Process .\client\CrazyShooter.exe -WorkingDirectory .\client -ArgumentList '-lan-profile=slot-2'
 ```
 
-角色和皮肤选择保存在房主的 `lan-profiles.json`。默认按登录占用的名额使用 `slot-1` 至 `slot-8`。想固定档案时，重启客户端后继续使用同一个 `-lan-profile` 名称。服务器显示的名字可以用 `-lan-name=昵称` 指定，例如 `-lan-profile=slot-1 -lan-name=玩家一`；名字会按档案保存，之后不带参数启动也会继续使用。公网玩家 ZIP 的 `Start Game.exe` 有「昵称」栏，填写后会存入 `launcher.ini`，并由服务端按档案永久保存。
+角色和皮肤选择保存在房主的 `lan-profiles.json`。默认按登录占用的名额使用 `slot-1` 至 `slot-8`。想固定档案时，重启客户端后继续使用同一个 `-lan-profile` 名称。服务器显示的名字可以用 `-lan-name=昵称` 指定，例如 `-lan-profile=slot-1 -lan-name=玩家一`；名字会按档案保存，之后不带参数启动也会继续使用。进入联机大厅后，点 LanRoomUI 上的「改名」按钮或按 F2 可以改昵称；服务端按档案永久保存。
 
 如果已经另有方式分发客户端，可用 `python .\prepare-lan-client.py 192.0.2.20 .\client-for-lan` 生成连接指定地址的副本。
 
@@ -86,4 +86,5 @@ Git 跟踪服务端和补丁源码。预装的游戏客户端通过私有 Releas
 Windows 客户端的 `unit` 包从 APK 的原版角色控制器移植 `Hold_Rifle_Snipe` 和 `Fire_Rifle_Snipe`。移植时把 Unity 2017 动作的 200 个索引和 21 个平移自由度缩为 Unity 5.6 的 161 和 8，只去掉额外的空项，并调整动画数据的原生分配大小。`database` 的 TextData 包含大厅的复活模式名称和说明（10990、10991）。为规避 102 人行道彩纹，Windows 场景包的 Terrain（PathID 2562）不采样 Android 烘焙光照层。
 
 开发接手、构建和联机遗留问题见 [handoff.md](handoff.md)。
+
 

@@ -83,6 +83,7 @@ $csc = "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
 - 启动方式：`python3 -u server.py --players 8 --host 198.51.100.10 --bind 0.0.0.0`。`--host` 只用于下发给客户端的公网地址，`--bind 0.0.0.0` 负责监听；两者已拆开。
 - ECS 上提供 `ecs-start.sh` / `ecs-stop.sh`，PID 写 `server.pid`，日志 `server.log`。安全组 `<ECS_INSTANCE_ID>` 已放行 TCP `43120/43123/43134` 和 UDP `43135` 到 `0.0.0.0/0`。
 - 房主现在由第一个登录大厅的玩家取得，不再依赖服务端所在电脑的连接。远程局要让房主先连入大厅，再准备和开局；其余玩家随后连接。`--host` 也允许公网地址，`prepare-lan-client.py` 不再限制私有 IPv4。
+- 昵称在联机大厅的 LanRoomUI「改名」按钮或 F2 修改，客户端发 213，服务端保存后回发 117 并刷新大厅顶栏；启动器不再负责昵称，只自动分配唯一 `pc-<机器名>` 档案。
 - 公网客户端 ZIP 是本地文件，放在 `map102-test/_local-archive/`，不要提交 Git 或挂到代码仓库；朋友通过网盘等私下分发。公网服务端没有鉴权，UDP 票据仍等于玩家 ID，只适合熟人。
 - 尚未实测：两台不同网络电脑的完整战斗链路（TCP 43134 和 UDP 43135 转发）、断线重连、ECS 重启后的自动拉起。当前只验证了公网登录/大厅的客户端连接。
 
@@ -91,3 +92,5 @@ $csc = "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
 运行 `python .\build-friend-zip.py <输出 ZIP>`，或加 `--client <已准备好的副本目录>`。打包源的 `Assembly-CSharp.dll` 和 `LanRoomUI.dll` 都须支持 `-lan-host`。
 
 本机项目的 `client/` 目前仍是启动器改动前的房主测试构建，可继续用于固定地址的邀请 ZIP。要重新生成 Release 玩家包，使用已验证的 `work/map102-player-stage/client`，或按上面的步骤重建两份 DLL 后再打包。
+
+
