@@ -579,12 +579,12 @@ class Match(asyncio.DatagramProtocol):
         spawn_kinds = kinds + [choice(kinds) for _ in range(3)]
         shuffle(spawn_kinds)
         spots = (
-            (-62.0, -8.0), (-42.0, -8.0), (-22.0, -8.0),
-            (28.0, -3.0), (42.0, -3.0), (62.0, -3.0),
+            (-56.7, 22.6, 90.0), (-42.9, 2.6, 90.0), (-21.9, 3.0, 90.0),
+            (31.7, 2.5, -90.0), (60.9, 2.9, -90.0), (67.2, 22.4, -90.0),
         )
         self.vehicles = {
-            101 + index: Vehicle(101 + index, spawn_kinds[index], x, z)
-            for index, (x, z) in enumerate(spots)
+            101 + index: Vehicle(101 + index, spawn_kinds[index], x, z, yaw)
+            for index, (x, z, yaw) in enumerate(spots)
         }
         self.next_vehicle_id = 107
         self.bullet_id = 0
@@ -1680,7 +1680,7 @@ class Match(asyncio.DatagramProtocol):
                     new_id = self.next_vehicle_id
                     self.next_vehicle_id += 1
                     kind = choice([1 + self.vehicle_skin_offset, 2 + self.vehicle_skin_offset, 3 + self.vehicle_skin_offset])
-                    replacement = Vehicle(new_id, kind, vehicle.x, vehicle.z)
+                    replacement = Vehicle(new_id, kind, vehicle.x, vehicle.z, vehicle.yaw)
                     self.vehicles[new_id] = replacement
                     self.broadcast(VEHICLE_SPAWN, struct.pack("<II", replacement.id, replacement.kind) + replacement.status())
                     print(f"vehicle {vehicle.id} respawned as {new_id}", flush=True)
