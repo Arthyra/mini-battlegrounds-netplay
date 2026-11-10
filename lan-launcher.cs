@@ -367,6 +367,7 @@ internal sealed class LanLauncher : Form
     {
         using (var client = new WebClient())
         {
+            client.Proxy = null;
             client.Encoding = Encoding.UTF8;
             var json = client.DownloadString(UpdateUrl);
             return new UpdateInfo
@@ -375,6 +376,32 @@ internal sealed class LanLauncher : Form
                 Url = JsonValue(json, "url"),
                 Sha256 = JsonValue(json, "sha256"),
             };
+        }
+    }
+
+    private static void DownloadUpdate(string url, string path, IProgress<UpdateProgress> progress)
+    {
+        var request = (HttpWebRequest)WebRequest.Create(url);
+        request.Proxy = null;
+        request.Timeout = 30000;
+        request.ReadWriteTimeout = 30000;
+        request.UserAgent = "MiniBattlegroundsUpdater/1.0";
+        request.Expect = null;
+        using (var response = (HttpWebResponse)request.GetResponse())
+        using (var input = response.GetResponseStream())
+        using (var output = File.Create(path))
+        {
+            var total = response.ContentLength;
+            var buffer = new byte[64 * 1024];
+            long read = 0;
+            int count;
+            while (input != null && (count = input.Read(buffer, 0, buffer.Length)) > 0)
+            {
+                output.Write(buffer, 0, count);
+                read += count;
+                var percent = total > 0 ? 5 + (int)(read * 65 / total) : 35;
+                progress.Report(new UpdateProgress { Percent = percent, Text = "下载更新包…" });
+            }
         }
     }
 
@@ -388,15 +415,7 @@ internal sealed class LanLauncher : Form
         try
         {
             progress.Report(new UpdateProgress { Percent = 2, Text = "连接更新服务器…" });
-            using (var client = new WebClient())
-            {
-                client.DownloadProgressChanged += (sender, args) =>
-                {
-                    var percent = 5 + args.ProgressPercentage * 65 / 100;
-                    progress.Report(new UpdateProgress { Percent = percent, Text = "下载更新包…" });
-                };
-                client.DownloadFile(latest.Url, archive);
-            }
+            DownloadUpdate(latest.Url, archive, progress);
             progress.Report(new UpdateProgress { Percent = 72, Text = "校验更新包…" });
             if (!string.IsNullOrEmpty(latest.Sha256))
             {
