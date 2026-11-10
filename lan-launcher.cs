@@ -656,12 +656,12 @@ internal sealed class LanLauncher : Form
             serverProcess.ErrorDataReceived += (sender, args) => AppendServerLog(args.Data);
             serverProcess.BeginOutputReadLine();
             serverProcess.BeginErrorReadLine();
-            if (!WaitForPort(host, 43120, 12000))
+            if (!WaitForPort(host, 43120, 6000))
             {
                 var detail = serverLog.ToString().Trim();
                 var exit = serverProcess != null && serverProcess.HasExited ? " 退出码 " + serverProcess.ExitCode : "";
                 StopRoom();
-                MessageBox.Show("服务端没有在 12 秒内启动。" + exit +
+                MessageBox.Show("服务端没有在 6 秒内启动。" + exit +
                     "\n\n" + (detail.Length > 0 ? detail : "没有服务端输出；检查 server\\server.exe、防火墙和端口占用。") +
                     "\n\n日志：" + serverLogPath, "Mini Battlegrounds");
                 return;
@@ -995,6 +995,7 @@ internal sealed class LanLauncher : Form
         }
     }
 }
+
 
 
 
