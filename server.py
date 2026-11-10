@@ -1756,8 +1756,11 @@ class Match(asyncio.DatagramProtocol):
         if message == 0 and size == 18 and player.udp is None:
             player.udp = addr
             print(f"battle UDP <- 0; player {player.id} registered", flush=True)
-        elif self.started and message == 82 and size == 38 and player.udp == addr and player.vehicle is None:
+        elif self.started and message == 82 and size == 38 and player.udp == addr:
             status = struct.unpack_from("<5f", data, 18)
+            if player.vehicle is not None:
+                vehicle = player.vehicle
+                status = (vehicle.x, vehicle.y, vehicle.z, status[3], status[4])
             if not all(map(math.isfinite, status)):
                 return
             if player.scoped:
@@ -1914,6 +1917,10 @@ if __name__ == "__main__":
                           args.owner_profile, args.admin_port, args.admin_token))
     except KeyboardInterrupt:
         pass
+
+
+
+
 
 
 
