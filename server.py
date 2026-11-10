@@ -122,6 +122,12 @@ VEHICLE_SPECS = {
     2: (2500, 6.0, 1.486, 3.84),
     3: (2000, 5.5, 1.490, 3.30),
 }
+# Hatchback is the quickest, pickup is the slowest, van sits between.
+VEHICLE_DRIVE_SPEEDS = {
+    1: (13.0, 6.0),
+    2: (9.0, 4.0),
+    3: (11.0, 5.0),
+}
 VEHICLE_BLAST_MESSAGES = {
     BULLET_EXPLOSION_HIT_UNIT: BULLET_EXPLOSION_HIT_VEHICLE,
     THROWABLE_HIT_UNIT: THROWABLE_HIT_VEHICLE,
@@ -329,7 +335,8 @@ class Vehicle:
             return False
         throttle = (105 in self.controls) - (107 in self.controls)
         steer = (111 in self.controls) - (109 in self.controls)
-        target = throttle * (10 if throttle >= 0 else 5)
+        forward_speed, reverse_speed = VEHICLE_DRIVE_SPEEDS[(self.kind - 1) % 3 + 1]
+        target = throttle * (forward_speed if throttle >= 0 else reverse_speed)
         self.speed += max(-16 * TICK, min(16 * TICK, target - self.speed))
         if not self.speed:
             return False
@@ -1844,6 +1851,7 @@ if __name__ == "__main__":
                           args.owner_profile, args.admin_port, args.admin_token))
     except KeyboardInterrupt:
         pass
+
 
 
 
