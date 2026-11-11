@@ -1357,6 +1357,9 @@ internal static class PatchCombat
         var worldDrop = new FieldDefinition("mLanWorldDropPending",
             FieldAttributes.Private | FieldAttributes.Static, core.Boolean);
         battleProxy.Fields.Add(worldDrop);
+        var loginRetryAt = new FieldDefinition("mLanLoginRetryAt",
+            FieldAttributes.Private | FieldAttributes.Static, core.Single);
+        battleProxy.Fields.Add(loginRetryAt);
 
         var engine = module.AssemblyResolver.Resolve(
             module.AssemblyReferences.Single(a => a.Name == "UnityEngine")).MainModule;
@@ -1374,6 +1377,7 @@ internal static class PatchCombat
         // Consume the pending drop here on the main thread instead; the
         // server is gone, so skip straight back to the login stage.
         var worldEntry = tickIl.Create(OpCodes.Nop);
+        var enteredTimes = module.GetType("CS.StageLogin").Fields.Single(f => f.Name == "EnteredTimes");
         tickIl.Emit(OpCodes.Ldsfld, worldDrop);
         tickIl.Emit(OpCodes.Brfalse, worldEntry);
         tickIl.Emit(OpCodes.Ldc_I4_0);
@@ -1384,6 +1388,8 @@ internal static class PatchCombat
         tickIl.Emit(OpCodes.Stsfld, givingUp);
         tickIl.Emit(OpCodes.Call, Method(manager, "get_Instance"));
         tickIl.Emit(OpCodes.Callvirt, Method(manager, "DisconnectAll"));
+        tickIl.Emit(OpCodes.Ldc_I4_0);
+        tickIl.Emit(OpCodes.Stsfld, enteredTimes);
         tickIl.Emit(OpCodes.Call, Method(module.GetType("CS.StageManager"), "get_Instance"));
         tickIl.Emit(OpCodes.Callvirt, setCurrentStageLogin);
         tickIl.Emit(OpCodes.Pop);
@@ -1397,6 +1403,50 @@ internal static class PatchCombat
         tickIl.Emit(OpCodes.Pop);
         tickIl.Emit(OpCodes.Ret);
         tickIl.Append(worldEntry);
+        // The LAN auto-login fires only on the first stage entry
+        // (StageLogin.EnteredTimes == 1), so a client pushed back to the
+        // login stage after a server death spins forever. When the login
+        // stage has no live connection, re-enter it with a reset counter
+        // so the auto-login arms again; one attempt per 3s.
+        var retryEnd = tickIl.Create(OpCodes.Nop);
+        var retryFire = tickIl.Create(OpCodes.Nop);
+        var retrySocket = tickIl.Create(OpCodes.Nop);
+        var retryStage = tickIl.Create(OpCodes.Nop);
+        // isinst + dup: both the jump and fall-through paths must leave an
+        // empty stack, so every skipped value is popped explicitly.
+        tickIl.Emit(OpCodes.Call, Method(module.GetType("CS.StageManager"), "get_Instance"));
+        tickIl.Emit(OpCodes.Callvirt, Method(module.GetType("CS.StageManager"), "GetCurrentStage"));
+        tickIl.Emit(OpCodes.Isinst, module.GetType("CS.StageLogin"));
+        tickIl.Emit(OpCodes.Dup);
+        tickIl.Emit(OpCodes.Brtrue, retryStage);
+        tickIl.Emit(OpCodes.Pop);
+        tickIl.Emit(OpCodes.Br, retryEnd);
+        tickIl.Append(retryStage);
+        tickIl.Emit(OpCodes.Pop);
+        tickIl.Emit(OpCodes.Call, Method(manager, "get_Instance"));
+        tickIl.Emit(OpCodes.Callvirt, Method(manager, "GetLoginServerProxy"));
+        tickIl.Emit(OpCodes.Dup);
+        tickIl.Emit(OpCodes.Brtrue, retrySocket);
+        tickIl.Emit(OpCodes.Pop);
+        tickIl.Emit(OpCodes.Br, retryFire);
+        tickIl.Append(retrySocket);
+        tickIl.Emit(OpCodes.Callvirt, Method(peer, "GetSocket"));
+        tickIl.Emit(OpCodes.Brfalse, retryFire);
+        tickIl.Emit(OpCodes.Br, retryEnd);
+        tickIl.Append(retryFire);
+        tickIl.Emit(OpCodes.Call, realtime);
+        tickIl.Emit(OpCodes.Ldsfld, loginRetryAt);
+        tickIl.Emit(OpCodes.Blt, retryEnd);
+        tickIl.Emit(OpCodes.Call, realtime);
+        tickIl.Emit(OpCodes.Ldc_R4, 3f);
+        tickIl.Emit(OpCodes.Add);
+        tickIl.Emit(OpCodes.Stsfld, loginRetryAt);
+        tickIl.Emit(OpCodes.Ldc_I4_0);
+        tickIl.Emit(OpCodes.Stsfld, enteredTimes);
+        tickIl.Emit(OpCodes.Call, Method(module.GetType("CS.StageManager"), "get_Instance"));
+        tickIl.Emit(OpCodes.Callvirt, setCurrentStageLogin);
+        tickIl.Emit(OpCodes.Pop);
+        tickIl.Append(retryEnd);
         tickIl.Emit(OpCodes.Ldsfld, pending);
         tickIl.Emit(OpCodes.Brfalse, done);
         tickIl.Emit(OpCodes.Call, realtime);
@@ -1458,6 +1508,8 @@ internal static class PatchCombat
         tickIl.Emit(OpCodes.Bge, stageBattleExit);
         tickIl.Emit(OpCodes.Call, Method(manager, "get_Instance"));
         tickIl.Emit(OpCodes.Callvirt, Method(manager, "DisconnectAll"));
+        tickIl.Emit(OpCodes.Ldc_I4_0);
+        tickIl.Emit(OpCodes.Stsfld, enteredTimes);
         tickIl.Emit(OpCodes.Call, Method(module.GetType("CS.StageManager"), "get_Instance"));
         tickIl.Emit(OpCodes.Callvirt, setCurrentStageLogin);
         tickIl.Emit(OpCodes.Pop);
