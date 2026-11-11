@@ -144,17 +144,38 @@ internal sealed class Updater : Form
                 // the attribute); File.Copy(overwrite) fails on those.
                 if (File.Exists(destination))
                     try { File.SetAttributes(destination, FileAttributes.Normal); } catch { }
-                try
+                // Security software and stale processes hold files briefly;
+                // retry each replacement before giving up.
+                for (var attempt = 1; ; attempt++)
                 {
-                    if (File.Exists(destination))
-                        try { File.SetAttributes(destination, FileAttributes.Normal); } catch { }
-                    File.Copy(files[i], destination, true);
-                    try { File.Delete(destination + ":Zone.Identifier"); } catch { }
-                }
-                catch (Exception copyError)
-                {
-                    log("replace FAILED " + relative + ": " + copyError.GetType().Name + " " + copyError.Message);
-                    throw;
+                    try
+                    {
+                        if (File.Exists(destination))
+                            try { File.SetAttributes(destination, FileAttributes.Normal); } catch { }
+                        File.Copy(files[i], destination, true);
+                        try { File.Delete(destination + ":Zone.Identifier"); } catch { }
+                        break;
+                    }
+                    catch (UnauthorizedAccessException copyError)
+                    {
+                        log("replace blocked " + relative + " (attempt " + attempt + "): " + copyError.Message);
+                        if (attempt >= 3)
+                        {
+                            log("replace FAILED " + relative);
+                            throw;
+                        }
+                        Thread.Sleep(1500);
+                    }
+                    catch (IOException copyError)
+                    {
+                        log("replace blocked " + relative + " (attempt " + attempt + "): " + copyError.Message);
+                        if (attempt >= 3)
+                        {
+                            log("replace FAILED " + relative);
+                            throw;
+                        }
+                        Thread.Sleep(1500);
+                    }
                 }
                 Set("正在安装：" + relative, 15 + (i + 1) * 78 / count);
             }
