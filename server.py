@@ -933,11 +933,17 @@ class Match(asyncio.DatagramProtocol):
         player.battle = writer
         player.udp = None  # Re-register UDP after every battle TCP reconnect.
         player.disconnected_at = 0.0
+        peer = writer.get_extra_info("peername")
+        print(f"battle conn enter player={player.id} battle={battle_id} writer={id(writer)} peer={peer} reconnect={reconnect} started={self.started} ready={player.ready}", flush=True)
         if reconnect:
-            print(f"battle reconnect <- 34; player {player.id}", flush=True)
+            print(f"battle reconnect <- 34; player {player.id} writer={id(writer)} peer={peer}", flush=True)
         try:
             await self.run_battle(player, reader, writer, battle_id, reconnect)
+        except Exception as error:
+            print(f"battle loop error: player {player.id} {type(error).__name__}: {error}", flush=True)
+            raise
         finally:
+            print(f"battle conn exit player={player.id} battle={battle_id} writer={id(writer)} peer={peer} is_current={player.battle is writer} started={self.started} ready={player.ready}", flush=True)
             if player.battle is writer:
                 player.battle = player.udp = None
                 player.disconnected_at = time.monotonic()
@@ -964,13 +970,25 @@ class Match(asyncio.DatagramProtocol):
                 return
 
     async def run_battle(self, player, reader, writer, battle_id, reconnect=False):
-        print(f"battle <- 34; player {player.id}", flush=True)
+        print(f"battle <- 34; player {player.id} writer={id(writer)} started={self.started} ready={player.ready}", flush=True)
         writer.write(frame(34, struct.pack("<HIIHI", 0, BATTLE_UDP_PORT, player.id, 1, MAP_ID)))
         writer.write(frame(SCOREBOARD, self.score_text().encode("utf-8")))
         asyncio.create_task(self.warn_if_udp_missing(player, writer, battle_id))
         if reconnect and self.started:
             # A returning player needs a snapshot; other peers do not.
+            print(f"battle -> 37 reconnect player={player.id} writer={id(writer)} started={self.started} ready={player.ready}", flush=True)
             writer.write(frame(37, self.battle_snapshot()))
+            # The first-load flow sends 39/40 after the client's 38. A
+            # reconnecting client does not send 38 again, so send the same
+            # scene-start messages only to this connection.
+            vehicles = struct.pack("<H", len(self.vehicles)) + b"".join(
+                struct.pack("<II", vehicle.id, vehicle.kind) + vehicle.status()
+                for vehicle in self.vehicles.values()
+            )
+            print(f"battle -> 39/40 reconnect player={player.id} writer={id(writer)}", flush=True)
+            writer.write(frame(39, struct.pack("<H", 0)))
+            writer.write(frame(40))
+            writer.write(frame(VEHICLES_SPAWN, vehicles))
         elif len(self.joined) == len(self.queued):
             await asyncio.sleep(0.5)
             if self.battle_id != battle_id or player.battle is not writer:
@@ -987,7 +1005,7 @@ class Match(asyncio.DatagramProtocol):
                 await send(writer, message, payload)
             elif message == 38 and payload == struct.pack("<f", 1.0) and not player.ready:
                 player.ready = True
-                print(f"battle <- 38; player {player.id} loaded", flush=True)
+                print(f"battle <- 38; player {player.id} loaded writer={id(writer)} started={self.started} ready={player.ready}", flush=True)
                 if all(member.ready for member in self.joined):
                     vehicles = struct.pack("<H", len(self.vehicles)) + b"".join(
                         struct.pack("<II", vehicle.id, vehicle.kind) + vehicle.status()

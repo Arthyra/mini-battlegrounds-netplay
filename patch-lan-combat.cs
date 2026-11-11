@@ -1275,6 +1275,9 @@ internal static class PatchCombat
         battleProxy.Fields.Add(givingUp);
         battleProxy.Fields.Add(attemptsMade);
         battleProxy.Fields.Add(retryAt);
+        var inProgress = new FieldDefinition("mLanReconnectInProgress",
+            FieldAttributes.Private | FieldAttributes.Static, core.Boolean);
+        battleProxy.Fields.Add(inProgress);
 
         var engine = module.AssemblyResolver.Resolve(
             module.AssemblyReferences.Single(a => a.Name == "UnityEngine")).MainModule;
@@ -1296,9 +1299,13 @@ internal static class PatchCombat
         tickIl.Emit(OpCodes.Ldc_I4_1);
         tickIl.Emit(OpCodes.Add);
         tickIl.Emit(OpCodes.Stsfld, attemptsMade);
+        tickIl.Emit(OpCodes.Ldc_I4_1);
+        tickIl.Emit(OpCodes.Stsfld, inProgress);
         tickIl.Emit(OpCodes.Call, Method(manager, "get_Instance"));
         tickIl.Emit(OpCodes.Callvirt, Method(manager, "GetBattleTcpServerProxy"));
         tickIl.Emit(OpCodes.Callvirt, reconnect);
+        tickIl.Emit(OpCodes.Ldc_I4_0);
+        tickIl.Emit(OpCodes.Stsfld, inProgress);
         tickIl.Emit(OpCodes.Brfalse, failed);
         tickIl.Emit(OpCodes.Ldc_I4_0);
         tickIl.Emit(OpCodes.Stsfld, pending);
@@ -1321,6 +1328,87 @@ internal static class PatchCombat
         tickIl.Emit(OpCodes.Stsfld, retryAt);
         tickIl.Append(done);
 
+        var trace = new MethodDefinition("LanTrace", MethodAttributes.Public | MethodAttributes.Static, core.Void);
+        trace.Parameters.Add(new ParameterDefinition("tag", ParameterAttributes.None, core.String));
+        trace.Parameters.Add(new ParameterDefinition("id", ParameterAttributes.None, core.Int32));
+        battleProxy.Methods.Add(trace);
+        var traceIl = trace.Body.GetILProcessor();
+        traceIl.Emit(OpCodes.Ldstr, "mbg-reconnect.log");
+        traceIl.Emit(OpCodes.Ldarg_0);
+        traceIl.Emit(OpCodes.Ldstr, " ");
+        traceIl.Emit(OpCodes.Call, module.ImportReference(typeof(string).GetMethod("Concat", new[] { typeof(string), typeof(string) })));
+        traceIl.Emit(OpCodes.Ldarg_1);
+        traceIl.Emit(OpCodes.Call, module.ImportReference(typeof(int).GetMethod("ToString", Type.EmptyTypes)));
+        traceIl.Emit(OpCodes.Call, module.ImportReference(typeof(string).GetMethod("Concat", new[] { typeof(string), typeof(string) })));
+        traceIl.Emit(OpCodes.Call, module.ImportReference(typeof(System.IO.File).GetMethod("AppendAllText", new[] { typeof(string), typeof(string) })));
+        traceIl.Emit(OpCodes.Ret);
+
+        var basePeer = module.GetType("CS.TcpPeer");
+        if (basePeer != null)
+        {
+            foreach (var name in new[] { "StartReceive", "DispatchRecvBuffer" })
+            {
+                var m = basePeer.Methods.FirstOrDefault(x => x.Name == name && x.Parameters.Count == 0);
+                if (m == null) continue;
+                var close = m.Body.Instructions.FirstOrDefault(i =>
+                    (i.OpCode == OpCodes.Call || i.OpCode == OpCodes.Callvirt) &&
+                    i.Operand != null && ((MethodReference)i.Operand).Name == "Close");
+                if (close == null) continue;
+                var mi = m.Body.GetILProcessor();
+                mi.InsertAfter(close, mi.Create(OpCodes.Ldarg_0));
+                mi.InsertAfter(close.Next, mi.Create(OpCodes.Callvirt, Method(basePeer, "OnDisconnect")));
+            }
+        }
+
+        var shadowBattle = module.GetType("CS.Battle");
+        var shadowLoaded = shadowBattle == null ? null : shadowBattle.Methods.FirstOrDefault(m => m.Name == "HandleBattleLoaded");
+        var qualityType = engine.GetType("UnityEngine.QualitySettings");
+        var setShadowDistance = module.ImportReference(Method(qualityType, "set_shadowDistance", "System.Single"));
+        if (shadowLoaded != null)
+        {
+            var si = shadowLoaded.Body.GetILProcessor();
+            var shadowFirst = shadowLoaded.Body.Instructions[0];
+            si.InsertBefore(shadowFirst, si.Create(OpCodes.Ldc_R4, 300f));
+            si.InsertBefore(shadowFirst, si.Create(OpCodes.Call, setShadowDistance));
+        }
+
+        var lastTcpRecv = new FieldDefinition("mLanLastTcpRecv",
+            FieldAttributes.Private | FieldAttributes.Static, core.Single);
+        var tcpActive = new FieldDefinition("mLanTcpActive",
+            FieldAttributes.Private | FieldAttributes.Static, core.Boolean);
+        battleProxy.Fields.Add(lastTcpRecv);
+        battleProxy.Fields.Add(tcpActive);
+
+        var heartbeat = new MethodDefinition("TickLanTcpHeartbeat",
+            MethodAttributes.Public | MethodAttributes.Static, core.Void);
+        battleProxy.Methods.Add(heartbeat);
+        var hi = heartbeat.Body.GetILProcessor();
+        var hbDone = hi.Create(OpCodes.Ret);
+        hi.Emit(OpCodes.Ldsfld, tcpActive);
+        hi.Emit(OpCodes.Brfalse, hbDone);
+        hi.Emit(OpCodes.Call, realtime);
+        hi.Emit(OpCodes.Ldsfld, lastTcpRecv);
+        hi.Emit(OpCodes.Sub);
+        hi.Emit(OpCodes.Ldc_R4, 8f);
+        hi.Emit(OpCodes.Ble, hbDone);
+        hi.Emit(OpCodes.Ldc_I4_0);
+        hi.Emit(OpCodes.Stsfld, tcpActive);
+        hi.Emit(OpCodes.Call, Method(manager, "get_Instance"));
+        hi.Emit(OpCodes.Callvirt, Method(manager, "GetBattleTcpServerProxy"));
+        hi.Emit(OpCodes.Callvirt, Method(battleProxy, "OnDisconnect"));
+        hi.Append(hbDone);
+
+        var recvHeartbeat = battleProxy.Methods.FirstOrDefault(m => m.Name == "OnReceive" && m.Parameters.Count == 1);
+        if (recvHeartbeat != null)
+        {
+            var ri = recvHeartbeat.Body.GetILProcessor();
+            var rf = recvHeartbeat.Body.Instructions[0];
+            ri.InsertBefore(rf, ri.Create(OpCodes.Call, realtime));
+            ri.InsertBefore(rf, ri.Create(OpCodes.Stsfld, lastTcpRecv));
+            ri.InsertBefore(rf, ri.Create(OpCodes.Ldc_I4_1));
+            ri.InsertBefore(rf, ri.Create(OpCodes.Stsfld, tcpActive));
+        }
+
         // Reconnect must be driven by a component that keeps updating after
         // the battle input component is disabled. Main.Update is always alive.
         var main = module.GetType("Main");
@@ -1329,6 +1417,8 @@ internal static class PatchCombat
         {
             mainUpdate.Body.GetILProcessor().InsertBefore(
                 mainUpdate.Body.Instructions[0], mainUpdate.Body.GetILProcessor().Create(OpCodes.Call, tick));
+            mainUpdate.Body.GetILProcessor().InsertBefore(
+                mainUpdate.Body.Instructions[0], mainUpdate.Body.GetILProcessor().Create(OpCodes.Call, heartbeat));
         }
         else
         {
@@ -1344,6 +1434,17 @@ internal static class PatchCombat
         var first = disconnect.Body.Instructions[0];
         var normalExit = onDisconnect.Create(OpCodes.Nop);
         var alreadyQueued = onDisconnect.Create(OpCodes.Ret);
+        onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Ldc_I4_0));
+        onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Stsfld, tcpActive));
+        // Ignore disconnects from a replaced/stale proxy. ConnectToBattleTcpServer
+        // swaps this instance; its old callback must not re-arm pending after a
+        // successful reconnect.
+        onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Ldarg_0));
+        onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Call, Method(manager, "get_Instance")));
+        onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Callvirt, Method(manager, "GetBattleTcpServerProxy")));
+        onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Bne_Un, alreadyQueued));
+        onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Ldsfld, inProgress));
+        onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Brtrue, alreadyQueued));
         onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Ldsfld, givingUp));
         onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Brtrue, normalExit));
         onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Ldsfld, pending));
@@ -1531,4 +1632,9 @@ internal static class PatchCombat
         }
     }
 }
+
+
+
+
+
 
