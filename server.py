@@ -762,7 +762,9 @@ class Match(asyncio.DatagramProtocol):
             if duplicate.world is not None:
                 duplicate.world.close()
             if self.owner is duplicate:
-                self.owner = None
+                # Transfer ownership to the fresh player object: a relogin
+                # must not strip the room owner.
+                self.owner = player
             del self.players[duplicate.id]
             print(f"login: replaced stale lobby profile {player.profile_name}", flush=True)
         saved = self.saved_profiles.get(player.profile_name, {})
