@@ -39,6 +39,8 @@ internal sealed class LanLauncher : Form
     [STAThread]
     [DllImport("user32.dll")]
     private static extern bool SetProcessDPIAware();
+    [DllImport("kernel32.dll")]
+    private static extern bool AttachConsole(uint process);
 
     private static void Main(string[] args)
     {
@@ -46,6 +48,11 @@ internal sealed class LanLauncher : Form
         // when the installed runtime predates the OS default.
         try { ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12; } catch { }
         applyUpdateSilently = args != null && Array.IndexOf(args, "--apply-update") >= 0;
+        if (applyUpdateSilently)
+        {
+            // Headless runs print results to the parent console.
+            try { AttachConsole(0xFFFFFFFFu); } catch { }
+        }
         try { SetProcessDPIAware(); } catch { }
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
@@ -514,8 +521,24 @@ internal sealed class LanLauncher : Form
     {
         if (string.IsNullOrWhiteSpace(latest.Url))
             throw new InvalidOperationException("更新地址为空。");
-        var staging = Path.Combine(Path.GetTempPath(), "mbg-update-stage-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(staging);
+        // 360 等安全软件会拦截未签名程序写入受保护的 %TEMP%，但通常放行
+        // 安装目录本身，所以 staging 优先放在启动器目录下。
+        var staging = Path.Combine(AppDomain.CurrentDomain.BaseDirectory,
+            "update-stage-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(staging);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            staging = Path.Combine(Path.GetTempPath(), "mbg-update-stage-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(staging);
+        }
+        catch (IOException)
+        {
+            staging = Path.Combine(Path.GetTempPath(), "mbg-update-stage-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(staging);
+        }
         var archive = Path.Combine(staging, "update.zip");
         try
         {
