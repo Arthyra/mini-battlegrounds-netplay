@@ -61,6 +61,17 @@ Goal：完成 ECS 模式开发、稳定性验证、HTTPS 自动更新与可靠�
 - 测试机同时运行 360 安全卫士 + 荣耀电脑管家 + Windows Defender
 - 360 对未签名程序写 %TEMP%/执行下载的 exe 有策略拦截（勒索防护类行为）——正式用户（国内）大概率遇到，已在启动器做缓解（staging 回退 + 明确错误提示）
 
+### 阶段三进展（ECS 稳定性）
+- ECS server.py 已升级到 main + start_room 诊断（临时）+ **房主转移修复**
+  （重登录曾把 self.owner 置 None，导致下一局无法开局——`316d0d9`）
+- `test-public-battle.py` 扩展为完整回归套件，对 ECS 实测 PASS：
+  登录×2 → 开局 → UDP 中继 → 战斗断线重连 34/37 → **重连后 UDP 重注册+中继** →
+  **mounted 状态中继（vehicle.y 回归）** → **scoped/mounted 断线重置**（`78b0f8b`）
+- 自愈能力：登录重试（吸收上一轮宽限窗口）、ensure_ready toggle-first、
+  ready+start+connect 重试（finish_round 竞态）
+- 10 轮 soak：RSS 稳定（29.8→30.0 MB）、fd 稳定（11）无泄漏；轮间竞态由重试吸收
+- 发现并修复：重登录丢失房主（`316d0d9`）；finish_round 竞态（测试侧自愈）
+
 ### 构建一致性
 - 0.10.9 构建输入：`_local-archive/public-client-v0109`（= v0108 底 + 最新补丁 Assembly-CSharp.dll）
 - manifest commit = `d3b94a5`+；dist/update/latest.json 双入口 md5 与本地一致
