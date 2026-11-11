@@ -124,10 +124,17 @@ internal sealed class Updater : Form
             Set("正在安装更新…", 15);
             var files = Directory.GetFiles(source, "*", SearchOption.AllDirectories);
             var count = Math.Max(1, files.Length);
+            var logPath = Path.Combine(root, "updater.log");
+            Action<string> log = message =>
+            {
+                try { File.AppendAllText(logPath, DateTime.Now.ToString("HH:mm:ss.fff") + " " + message + Environment.NewLine); } catch { }
+            };
+            log("update start: source=" + source + " root=" + root + " files=" + files.Length);
             for (var i = 0; i < files.Length; i++)
             {
                 var relative = files[i].Substring(source.Length).TrimStart('\\', '/');
                 var destination = Path.Combine(root, relative);
+                log("replace " + relative);
                 if (string.Equals(Path.GetFullPath(destination), Path.GetFullPath(Application.ExecutablePath), StringComparison.OrdinalIgnoreCase))
                     continue;
                 var directory = Path.GetDirectoryName(destination);
@@ -137,8 +144,18 @@ internal sealed class Updater : Form
                 // the attribute); File.Copy(overwrite) fails on those.
                 if (File.Exists(destination))
                     try { File.SetAttributes(destination, FileAttributes.Normal); } catch { }
-                File.Copy(files[i], destination, true);
-                try { File.Delete(destination + ":Zone.Identifier"); } catch { }
+                try
+                {
+                    if (File.Exists(destination))
+                        try { File.SetAttributes(destination, FileAttributes.Normal); } catch { }
+                    File.Copy(files[i], destination, true);
+                    try { File.Delete(destination + ":Zone.Identifier"); } catch { }
+                }
+                catch (Exception copyError)
+                {
+                    log("replace FAILED " + relative + ": " + copyError.GetType().Name + " " + copyError.Message);
+                    throw;
+                }
                 Set("正在安装：" + relative, 15 + (i + 1) * 78 / count);
             }
             try
