@@ -22,6 +22,20 @@ internal static class PatchCombat
             il.InsertBefore(anchor, instruction);
     }
 
+    private static void Trace(ILProcessor il, MethodReference trace, string tag, int id)
+    {
+        il.Emit(OpCodes.Ldstr, tag);
+        il.Emit(OpCodes.Ldc_I4, id);
+        il.Emit(OpCodes.Call, trace);
+    }
+
+    private static void InsertTrace(ILProcessor il, Instruction anchor, MethodReference trace, string tag, int id)
+    {
+        il.InsertBefore(anchor, il.Create(OpCodes.Ldstr, tag));
+        il.InsertBefore(anchor, il.Create(OpCodes.Ldc_I4, id));
+        il.InsertBefore(anchor, il.Create(OpCodes.Call, trace));
+    }
+
     private static void InstallHitReport(ModuleDefinition module, TypeDefinition battle, TypeDefinition unit)
     {
         var bullet = module.GetType("CS.Bullet");
@@ -1189,6 +1203,46 @@ internal static class PatchCombat
         var peer = module.GetType("CS.TcpPeer");
         var core = module.TypeSystem;
 
+        // Debug trace: one line per probe with a wall-clock timestamp. Written
+        // to the client working directory as mbg-reconnect.log.
+        var trace = new MethodDefinition("LanTrace", MethodAttributes.Public | MethodAttributes.Static, core.Void);
+        trace.Parameters.Add(new ParameterDefinition("tag", ParameterAttributes.None, core.String));
+        trace.Parameters.Add(new ParameterDefinition("id", ParameterAttributes.None, core.Int32));
+        battleProxy.Methods.Add(trace);
+        var traceIl = trace.Body.GetILProcessor();
+        var concat2 = module.ImportReference(typeof(string).GetMethod("Concat", new[] { typeof(string), typeof(string) }));
+        var objectToString = module.ImportReference(typeof(object).GetMethod("ToString", Type.EmptyTypes));
+        var tickCount = module.ImportReference(typeof(Environment).GetProperty("TickCount").GetGetMethod());
+        var appendAllText = module.ImportReference(typeof(System.IO.File).GetMethod("AppendAllText", new[] { typeof(string), typeof(string) }));
+        // Value types must be boxed before a virtual ToString call: raw
+        // callvirt on a stack value is invalid IL for the Unity Mono JIT.
+        traceIl.Emit(OpCodes.Ldstr, "mbg-reconnect.log");
+        traceIl.Emit(OpCodes.Call, tickCount);
+        traceIl.Emit(OpCodes.Box, core.Int32);
+        traceIl.Emit(OpCodes.Callvirt, objectToString);
+        traceIl.Emit(OpCodes.Ldstr, " ");
+        traceIl.Emit(OpCodes.Call, concat2);
+        traceIl.Emit(OpCodes.Ldarg_0);
+        traceIl.Emit(OpCodes.Call, concat2);
+        traceIl.Emit(OpCodes.Ldstr, " ");
+        traceIl.Emit(OpCodes.Call, concat2);
+        traceIl.Emit(OpCodes.Ldarg_1);
+        traceIl.Emit(OpCodes.Box, core.Int32);
+        traceIl.Emit(OpCodes.Callvirt, objectToString);
+        traceIl.Emit(OpCodes.Call, concat2);
+        traceIl.Emit(OpCodes.Ldstr, "\n");
+        traceIl.Emit(OpCodes.Call, concat2);
+        traceIl.Emit(OpCodes.Call, appendAllText);
+        traceIl.Emit(OpCodes.Ret);
+
+        // Operand references lifted from the original OnDisconnect giving-up
+        // path so the reconnect tick can exit the same way (StageLogin + 10107).
+        var disconnectMethod = battleProxy.Methods.Single(m => m.Name == "OnDisconnect");
+        var exitOperands = disconnectMethod.Body.Instructions
+            .Where(i => (i.OpCode == OpCodes.Call || i.OpCode == OpCodes.Callvirt) && i.Operand is MethodReference)
+            .Select(i => (MethodReference)i.Operand).ToList();
+        var setCurrentStageLogin = exitOperands.First(m => m.Name == "SetCurrentStage");
+
         var reconnect = new MethodDefinition("ReconnectLanBattle", MethodAttributes.Public, core.Boolean);
         battleProxy.Methods.Add(reconnect);
         var serverInfo = new VariableDefinition(info);
@@ -1220,6 +1274,7 @@ internal static class PatchCombat
         il.Emit(OpCodes.Ldfld, info.Fields.Single(f => f.Name == "mTcpPort"));
         il.Emit(OpCodes.Callvirt, Method(manager, "ConnectToBattleTcpServer", "System.String", "System.Int32"));
         il.Emit(OpCodes.Brfalse, next);
+        Trace(il, trace, "rc", 15);
 
         il.Emit(OpCodes.Newobj, Method(packet, ".ctor"));
         il.Emit(OpCodes.Stloc, request);
@@ -1247,6 +1302,7 @@ internal static class PatchCombat
         il.Emit(OpCodes.Ldloc, request);
         il.Emit(OpCodes.Callvirt, Method(buffer, "get_Base"));
         il.Emit(OpCodes.Callvirt, Method(peer, "Send", "System.Byte[]"));
+        Trace(il, trace, "rc", 16);
         il.Emit(OpCodes.Ldc_I4_1);
         il.Emit(OpCodes.Ret);
 
@@ -1259,6 +1315,7 @@ internal static class PatchCombat
         il.Emit(OpCodes.Ldc_I4_1);
         il.Emit(OpCodes.Blt, loop);
         il.Append(fail);
+        Trace(il, trace, "rc", 14);
         il.Emit(OpCodes.Ret);
 
         // The disconnect callback may run on Unity's main thread. Keep it
@@ -1295,6 +1352,7 @@ internal static class PatchCombat
         tickIl.Emit(OpCodes.Call, realtime);
         tickIl.Emit(OpCodes.Ldsfld, retryAt);
         tickIl.Emit(OpCodes.Blt, done);
+        Trace(tickIl, trace, "tick", 10);
         tickIl.Emit(OpCodes.Ldsfld, attemptsMade);
         tickIl.Emit(OpCodes.Ldc_I4_1);
         tickIl.Emit(OpCodes.Add);
@@ -1307,41 +1365,70 @@ internal static class PatchCombat
         tickIl.Emit(OpCodes.Ldc_I4_0);
         tickIl.Emit(OpCodes.Stsfld, inProgress);
         tickIl.Emit(OpCodes.Brfalse, failed);
+        Trace(tickIl, trace, "tick", 11);
         tickIl.Emit(OpCodes.Ldc_I4_0);
         tickIl.Emit(OpCodes.Stsfld, pending);
         tickIl.Emit(OpCodes.Br, done);
         tickIl.Append(failed);
+        Trace(tickIl, trace, "tick", 12);
         tickIl.Emit(OpCodes.Ldsfld, attemptsMade);
         tickIl.Emit(OpCodes.Ldc_I4_S, (sbyte)20);
         tickIl.Emit(OpCodes.Blt, later);
+        Trace(tickIl, trace, "tick", 13);
         tickIl.Emit(OpCodes.Ldc_I4_0);
         tickIl.Emit(OpCodes.Stsfld, pending);
         tickIl.Emit(OpCodes.Ldc_I4_1);
         tickIl.Emit(OpCodes.Stsfld, givingUp);
         tickIl.Emit(OpCodes.Call, Method(manager, "get_Instance"));
         tickIl.Emit(OpCodes.Callvirt, Method(manager, "DisconnectAll"));
+        // Mirror the original giving-up exit: only pull the client back to the
+        // login stage when a battle scene is actually still running, so an
+        // already-ended round (result screen) is not interrupted.
+        var stageBattleExit = tickIl.Create(OpCodes.Nop);
+        var stageType = module.GetType("CS.StageBattle");
+        var battleType = module.GetType("CS.Battle");
+        var exitStage = new VariableDefinition(stageType);
+        var exitBattle = new VariableDefinition(battleType);
+        tick.Body.Variables.Add(exitStage);
+        tick.Body.Variables.Add(exitBattle);
+        tickIl.Emit(OpCodes.Call, Method(manager, "get_Instance"));
+        tickIl.Emit(OpCodes.Callvirt, Method(module.GetType("CS.StageManager"), "GetCurrentStage"));
+        tickIl.Emit(OpCodes.Isinst, module.GetType("CS.StageBattle"));
+        tickIl.Emit(OpCodes.Stloc, exitStage);
+        tickIl.Emit(OpCodes.Ldloc, exitStage);
+        tickIl.Emit(OpCodes.Brfalse, stageBattleExit);
+        tickIl.Emit(OpCodes.Ldloc, exitStage);
+        tickIl.Emit(OpCodes.Callvirt, Method(stageType, "GetBattle"));
+        tickIl.Emit(OpCodes.Stloc, exitBattle);
+        tickIl.Emit(OpCodes.Ldloc, exitBattle);
+        tickIl.Emit(OpCodes.Brfalse, stageBattleExit);
+        tickIl.Emit(OpCodes.Ldloc, exitBattle);
+        tickIl.Emit(OpCodes.Callvirt, Method(battleType, "GetState"));
+        tickIl.Emit(OpCodes.Ldc_I4_4);
+        tickIl.Emit(OpCodes.Bge, stageBattleExit);
+        tickIl.Emit(OpCodes.Call, Method(manager, "get_Instance"));
+        tickIl.Emit(OpCodes.Callvirt, Method(manager, "DisconnectAll"));
+        tickIl.Emit(OpCodes.Call, Method(module.GetType("CS.StageManager"), "get_Instance"));
+        tickIl.Emit(OpCodes.Callvirt, setCurrentStageLogin);
+        tickIl.Emit(OpCodes.Pop);
+        tickIl.Emit(OpCodes.Call, Method(module.GetType("CS.MessageboxManager"), "get_Instance"));
+        tickIl.Emit(OpCodes.Call, Method(module.GetType("CS.TextDataManager"), "get_Instance"));
+        tickIl.Emit(OpCodes.Ldc_I4, 10107);
+        tickIl.Emit(OpCodes.Ldc_I4_1);
+        tickIl.Emit(OpCodes.Callvirt, Method(module.GetType("CS.TextDataManager"), "GetData", "System.UInt32", "System.Boolean"));
+        tickIl.Emit(OpCodes.Ldc_I4_0);
+        tickIl.Emit(OpCodes.Callvirt, Method(module.GetType("CS.MessageboxManager"), "Show", "System.String", "CS.Messagebox/Buttons"));
+        tickIl.Emit(OpCodes.Pop);
+        tickIl.Append(stageBattleExit);
         tickIl.Emit(OpCodes.Br, done);
         tickIl.Append(later);
         tickIl.Emit(OpCodes.Call, realtime);
-        tickIl.Emit(OpCodes.Ldc_R4, 1f);
+        tickIl.Emit(OpCodes.Ldc_R4, 1.5f);
         tickIl.Emit(OpCodes.Add);
         tickIl.Emit(OpCodes.Stsfld, retryAt);
         tickIl.Append(done);
 
-        var trace = new MethodDefinition("LanTrace", MethodAttributes.Public | MethodAttributes.Static, core.Void);
-        trace.Parameters.Add(new ParameterDefinition("tag", ParameterAttributes.None, core.String));
-        trace.Parameters.Add(new ParameterDefinition("id", ParameterAttributes.None, core.Int32));
-        battleProxy.Methods.Add(trace);
-        var traceIl = trace.Body.GetILProcessor();
-        traceIl.Emit(OpCodes.Ldstr, "mbg-reconnect.log");
-        traceIl.Emit(OpCodes.Ldarg_0);
-        traceIl.Emit(OpCodes.Ldstr, " ");
-        traceIl.Emit(OpCodes.Call, module.ImportReference(typeof(string).GetMethod("Concat", new[] { typeof(string), typeof(string) })));
-        traceIl.Emit(OpCodes.Ldarg_1);
-        traceIl.Emit(OpCodes.Call, module.ImportReference(typeof(int).GetMethod("ToString", Type.EmptyTypes)));
-        traceIl.Emit(OpCodes.Call, module.ImportReference(typeof(string).GetMethod("Concat", new[] { typeof(string), typeof(string) })));
-        traceIl.Emit(OpCodes.Call, module.ImportReference(typeof(System.IO.File).GetMethod("AppendAllText", new[] { typeof(string), typeof(string) })));
-        traceIl.Emit(OpCodes.Ret);
+        var traceRef = (MethodReference)trace;
 
         var basePeer = module.GetType("CS.TcpPeer");
         if (basePeer != null)
@@ -1355,8 +1442,66 @@ internal static class PatchCombat
                     i.Operand != null && ((MethodReference)i.Operand).Name == "Close");
                 if (close == null) continue;
                 var mi = m.Body.GetILProcessor();
-                mi.InsertAfter(close, mi.Create(OpCodes.Ldarg_0));
-                mi.InsertAfter(close.Next, mi.Create(OpCodes.Callvirt, Method(basePeer, "OnDisconnect")));
+                // Trace which native close path fired (receive-thread exception
+                // vs dispatch exception) before closing the socket.
+                mi.InsertBefore(close, mi.Create(OpCodes.Ldstr, name == "StartReceive" ? "sr" : "dr"));
+                mi.InsertBefore(close, mi.Create(OpCodes.Ldc_I4, name == "StartReceive" ? 40 : 41));
+                mi.InsertBefore(close, mi.Create(OpCodes.Call, trace));
+                // The original DispatchRecvBuffer catch already calls
+                // OnDisconnect; only add the call where it is missing.
+                var afterClose = close.Next;
+                var alreadyNotified = afterClose != null && afterClose.OpCode == OpCodes.Ldarg_0 &&
+                    afterClose.Next != null && afterClose.Next.OpCode == OpCodes.Callvirt &&
+                    afterClose.Next.Operand is MethodReference &&
+                    ((MethodReference)afterClose.Next.Operand).Name == "OnDisconnect";
+                if (!alreadyNotified)
+                {
+                    mi.InsertAfter(close, mi.Create(OpCodes.Ldarg_0));
+                    mi.InsertAfter(close.Next, mi.Create(OpCodes.Callvirt, Method(basePeer, "OnDisconnect")));
+                }
+            }
+
+            // Trace send failures: a send error closes the socket from the
+            // client side and must show up in the trace.
+            var send = basePeer.Methods.FirstOrDefault(x => x.Name == "Send" && x.Parameters.Count == 1);
+            if (send != null)
+            {
+                var close = send.Body.Instructions.FirstOrDefault(i =>
+                    (i.OpCode == OpCodes.Call || i.OpCode == OpCodes.Callvirt) &&
+                    i.Operand != null && ((MethodReference)i.Operand).Name == "Close");
+                if (close != null)
+                {
+                    var si = send.Body.GetILProcessor();
+                    si.InsertBefore(close, si.Create(OpCodes.Ldstr, "sf"));
+                    si.InsertBefore(close, si.Create(OpCodes.Ldc_I4, 50));
+                    si.InsertBefore(close, si.Create(OpCodes.Call, trace));
+                }
+            }
+
+            // Trace the Update-path disconnect (socket null with drained
+            // buffer), gated to battle proxies only so login/world traffic
+            // does not pollute the trace.
+            var update = basePeer.Methods.FirstOrDefault(x => x.Name == "Update" && x.Parameters.Count == 1);
+            if (update != null)
+            {
+                var call = update.Body.Instructions.FirstOrDefault(i =>
+                    i.OpCode == OpCodes.Callvirt && i.Operand is MethodReference &&
+                    ((MethodReference)i.Operand).Name == "OnDisconnect");
+                if (call != null)
+                {
+                    var ui = update.Body.GetILProcessor();
+                    var skip = ui.Create(OpCodes.Nop);
+                    // Each instruction lands directly before the OnDisconnect
+                    // call, so the final sequence is
+                    // ldarg.0/isinst/brfalse/trace/skip.
+                    ui.InsertBefore(call, ui.Create(OpCodes.Ldarg_0));
+                    ui.InsertBefore(call, ui.Create(OpCodes.Isinst, battleProxy));
+                    ui.InsertBefore(call, ui.Create(OpCodes.Brfalse, skip));
+                    ui.InsertBefore(call, ui.Create(OpCodes.Ldstr, "up"));
+                    ui.InsertBefore(call, ui.Create(OpCodes.Ldc_I4, 60));
+                    ui.InsertBefore(call, ui.Create(OpCodes.Call, trace));
+                    ui.InsertBefore(call, skip);
+                }
             }
         }
 
@@ -1393,6 +1538,7 @@ internal static class PatchCombat
         hi.Emit(OpCodes.Ble, hbDone);
         hi.Emit(OpCodes.Ldc_I4_0);
         hi.Emit(OpCodes.Stsfld, tcpActive);
+        Trace(hi, trace, "hb", 20);
         hi.Emit(OpCodes.Call, Method(manager, "get_Instance"));
         hi.Emit(OpCodes.Callvirt, Method(manager, "GetBattleTcpServerProxy"));
         hi.Emit(OpCodes.Callvirt, Method(battleProxy, "OnDisconnect"));
@@ -1407,6 +1553,29 @@ internal static class PatchCombat
             ri.InsertBefore(rf, ri.Create(OpCodes.Stsfld, lastTcpRecv));
             ri.InsertBefore(rf, ri.Create(OpCodes.Ldc_I4_1));
             ri.InsertBefore(rf, ri.Create(OpCodes.Stsfld, tcpActive));
+            // Trace every received battle packet with its message id so the
+            // trace shows whether ping echoes and snapshot bursts arrive.
+            var msgIdStore = recvHeartbeat.Body.Instructions.FirstOrDefault(i => i.OpCode == OpCodes.Stloc_2);
+            if (msgIdStore != null)
+            {
+                ri.InsertAfter(msgIdStore, ri.Create(OpCodes.Ldstr, "rx"));
+                ri.InsertAfter(msgIdStore.Next, ri.Create(OpCodes.Ldloc_2));
+                ri.InsertAfter(msgIdStore.Next.Next, ri.Create(OpCodes.Call, trace));
+            }
+        }
+
+        // Trace the join-battle response: entry and the stage re-entry, which
+        // is the reconnect path most likely to misbehave.
+        var joinBattle = battleProxy.Methods.FirstOrDefault(m => m.Name == "HandleJoinBattle");
+        if (joinBattle != null)
+        {
+            var ji = joinBattle.Body.GetILProcessor();
+            InsertTrace(ji, joinBattle.Body.Instructions[0], trace, "jb", 30);
+            var stageSwitch = joinBattle.Body.Instructions.FirstOrDefault(i =>
+                (i.OpCode == OpCodes.Callvirt || i.OpCode == OpCodes.Call) &&
+                i.Operand is MethodReference && ((MethodReference)i.Operand).Name == "SetCurrentStage");
+            if (stageSwitch != null && stageSwitch.Next != null)
+                InsertTrace(ji, stageSwitch.Next, trace, "jb", 31);
         }
 
         // Reconnect must be driven by a component that keeps updating after
@@ -1434,6 +1603,7 @@ internal static class PatchCombat
         var first = disconnect.Body.Instructions[0];
         var normalExit = onDisconnect.Create(OpCodes.Nop);
         var alreadyQueued = onDisconnect.Create(OpCodes.Ret);
+        InsertTrace(onDisconnect, first, trace, "od", 0);
         onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Ldc_I4_0));
         onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Stsfld, tcpActive));
         // Ignore disconnects from a replaced/stale proxy. ConnectToBattleTcpServer
@@ -1460,7 +1630,13 @@ internal static class PatchCombat
         onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Stsfld, attemptsMade));
         onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Ldc_R4, 0f));
         onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Stsfld, retryAt));
+        onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Ldstr, "od"));
+        onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Ldc_I4, 4));
+        onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Call, trace));
         onDisconnect.InsertBefore(first, alreadyQueued);
+        onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Ldstr, "od"));
+        onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Ldc_I4, 5));
+        onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Call, trace));
         onDisconnect.InsertBefore(first, normalExit);
 
         // Permit normal reconnect behavior after a new lobby login.

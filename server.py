@@ -887,6 +887,8 @@ class Match(asyncio.DatagramProtocol):
             elif message == 27 and payload == struct.pack("<H", RESPAWN_MODE) and not self.queued:
                 player.room_ready = not player.room_ready
                 self.send_room_state()
+                if os.environ.get("MBG_TEST_AUTOSTART") == "1" and len(self.players) >= 2:
+                    asyncio.get_running_loop().call_later(1.0, self.start_room, self.owner)
             elif message == ROOM_START and not payload:
                 self.start_room(player)
 
@@ -973,6 +975,20 @@ class Match(asyncio.DatagramProtocol):
             except (ConnectionError, OSError):
                 return
 
+    async def drop_battle_test(self, player, writer, battle_id):
+        # Test hook (MBG_TEST_DROP_BATTLE=1): drop the host battle connection
+        # shortly after the battle starts to exercise reconnect recovery.
+        for _ in range(300):
+            if self.battle_id != battle_id or player.battle is not writer:
+                return
+            if self.started:
+                break
+            await asyncio.sleep(0.1)
+        await asyncio.sleep(3)
+        if player.battle is writer:
+            print("test hook: dropping player 1 battle connection", flush=True)
+            writer.close()
+
     async def run_battle(self, player, reader, writer, battle_id, reconnect=False):
         print(f"battle <- 34; player {player.id} writer={id(writer)} started={self.started} ready={player.ready}", flush=True)
         writer.write(frame(34, struct.pack("<HIIHI", 0, BATTLE_UDP_PORT, player.id, 1, MAP_ID)))
@@ -981,6 +997,8 @@ class Match(asyncio.DatagramProtocol):
         if old_warning is not None:
             old_warning.cancel()
         player.udp_warning = asyncio.create_task(self.warn_if_udp_missing(player, writer, battle_id))
+        if os.environ.get("MBG_TEST_DROP_BATTLE") == "1" and player.id == 1 and not reconnect:
+            asyncio.create_task(self.drop_battle_test(player, writer, battle_id))
         if reconnect and self.started:
             # A returning player needs a snapshot; other peers do not.
             print(f"battle -> 37 reconnect player={player.id} writer={id(writer)} started={self.started} ready={player.ready}", flush=True)
