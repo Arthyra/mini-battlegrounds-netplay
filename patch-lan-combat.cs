@@ -1530,10 +1530,18 @@ internal static class PatchCombat
         {
             var si = shadowLoaded.Body.GetILProcessor();
             var shadowFirst = shadowLoaded.Body.Instructions[0];
-            // 300 renders every distant tree shadow onto the ground and read as a
-            // texture defect; 60 keeps nearby shadows without the blotches.
-            si.InsertBefore(shadowFirst, si.Create(OpCodes.Ldc_R4, 60f));
+            // A single cascade stretched over 300m rendered distant tree
+            // shadows as blotchy artifacts that players read as a texture defect.
+            // Four cascades, VeryHigh resolution and CloseFit projection keep
+            // shadows fine-grained at 150m instead of losing them entirely.
+            si.InsertBefore(shadowFirst, si.Create(OpCodes.Ldc_R4, 150f));
             si.InsertBefore(shadowFirst, si.Create(OpCodes.Call, setShadowDistance));
+            si.InsertBefore(shadowFirst, si.Create(OpCodes.Ldc_I4_4));
+            si.InsertBefore(shadowFirst, si.Create(OpCodes.Call, module.ImportReference(Method(qualityType, "set_shadowCascades", "System.Int32"))));
+            si.InsertBefore(shadowFirst, si.Create(OpCodes.Ldc_I4_3));
+            si.InsertBefore(shadowFirst, si.Create(OpCodes.Call, module.ImportReference(Method(qualityType, "set_shadowResolution", "UnityEngine.ShadowResolution"))));
+            si.InsertBefore(shadowFirst, si.Create(OpCodes.Ldc_I4_0));
+            si.InsertBefore(shadowFirst, si.Create(OpCodes.Call, module.ImportReference(Method(qualityType, "set_shadowProjection", "UnityEngine.ShadowProjection"))));
         }
 
         var lastTcpRecv = new FieldDefinition("mLanLastTcpRecv",

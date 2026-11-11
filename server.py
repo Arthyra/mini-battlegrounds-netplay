@@ -887,7 +887,8 @@ class Match(asyncio.DatagramProtocol):
             elif message == 27 and payload == struct.pack("<H", RESPAWN_MODE) and not self.queued:
                 player.room_ready = not player.room_ready
                 self.send_room_state()
-                if os.environ.get("MBG_TEST_AUTOSTART") == "1" and len(self.players) >= 2:
+                if (os.environ.get("MBG_TEST_AUTOSTART") == "1" and len(self.players) >= 2
+                        and all(p.room_ready for p in self.players.values())):
                     asyncio.get_running_loop().call_later(1.0, self.start_room, self.owner)
             elif message == ROOM_START and not payload:
                 self.start_room(player)
@@ -955,6 +956,12 @@ class Match(asyncio.DatagramProtocol):
                 player.disconnected_at = time.monotonic()
                 player.firing = False
                 player.reload_at = 0.0
+                player.scoped = False
+                if player.vehicle:
+                    # The reconnecting client reloads the battle scene on foot;
+                    # a lingering mount would pin its position to the vehicle
+                    # and freeze the player after recovery.
+                    self.unmount(player)
                 if not self.started:
                     # Preserve the loading window instead of invalidating battle_id.
                     player.ready = False
@@ -1004,7 +1011,9 @@ class Match(asyncio.DatagramProtocol):
         if old_warning is not None:
             old_warning.cancel()
         player.udp_warning = asyncio.create_task(self.warn_if_udp_missing(player, writer, battle_id))
-        if os.environ.get("MBG_TEST_DROP_BATTLE") in ("1", "2") and player.id == 1 and not reconnect:
+        if (os.environ.get("MBG_TEST_DROP_BATTLE") in ("1", "2")
+                and player.id == int(os.environ.get("MBG_TEST_DROP_PLAYER", "1"))
+                and not reconnect):
             asyncio.create_task(self.drop_battle_test(player, writer, battle_id))
         if reconnect and self.started:
             # A returning player needs a snapshot; other peers do not.
