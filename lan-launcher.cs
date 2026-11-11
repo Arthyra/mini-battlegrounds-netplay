@@ -42,6 +42,10 @@ internal sealed class LanLauncher : Form
 
     private static void Main(string[] args)
     {
+        // The update endpoint is HTTPS only; TLS 1.2 must be available even
+        // when the installed runtime predates the OS default.
+        try { ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12; } catch { }
+        applyUpdateSilently = args != null && Array.IndexOf(args, "--apply-update") >= 0;
         try { SetProcessDPIAware(); } catch { }
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
@@ -64,6 +68,33 @@ internal sealed class LanLauncher : Form
             else
                 MessageBox.Show("\u8bf7\u8f93\u5165\u6709\u6548\u7684 IPv4 \u5730\u5740\u3002");
             return;
+        }
+        if (applyUpdateSilently)
+        {
+            // Headless update mode: fetch, verify, download, apply and hand
+            // over to the installer without any UI, for automated checks.
+            var exitCode = 0;
+            try
+            {
+                var latest = FetchUpdate();
+                LogUpdate("manifest ok: v" + latest.Version + " url=" + latest.Url);
+                if (!IsNewer(latest.Version, LocalVersion()))
+                    Console.WriteLine("NO-UPDATE current=" + LocalVersion() + " latest=" + latest.Version);
+                else
+                {
+                    var staging = ApplyUpdate(latest, new Progress<UpdateProgress>());
+                    LogUpdate("apply ok, staging=" + staging);
+                    StartInstaller(staging);
+                    Console.WriteLine("UPDATE-OK staging=" + staging);
+                }
+            }
+            catch (Exception headlessError)
+            {
+                LogUpdate("update failed: " + headlessError.GetType().Name + " " + headlessError.Message);
+                Console.WriteLine("UPDATE-FAIL " + headlessError.GetType().Name + " " + headlessError.Message);
+                exitCode = 1;
+            }
+            Environment.Exit(exitCode);
         }
         Application.Run(new LanLauncher());
     }
@@ -127,7 +158,7 @@ internal sealed class LanLauncher : Form
         firewallButton.Click += (sender, args) => AllowFirewall(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "server", "server.exe"));
         Controls.AddRange(new Control[] { status, cloud, create, search, manual, logButton, firewallButton });
         AcceptButton = cloud;
-        Shown += async (sender, args) => await CheckForUpdate();
+        Shown += async (sender, args) => await CheckForUpdate(applyUpdateSilently);
         cloud.Click += (sender, args) => JoinHost(CloudHost);
         search.Click += async (sender, args) => await SearchLan();
         manual.Click += (sender, args) => PromptForAddress();
@@ -270,7 +301,20 @@ internal sealed class LanLauncher : Form
         public string Signature;
     }
 
-    private const string UpdateUrl = "http://198.51.100.10:8080/update/latest.json";
+    private const string UpdateUrl = "https://198.51.100.10/mbg-update/latest.json";
+    private static bool applyUpdateSilently;
+
+    private static void LogUpdate(string message)
+    {
+        try
+        {
+            var line = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + " " + message + Environment.NewLine;
+            File.AppendAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "launcher-update.log"), line);
+        }
+        catch
+        {
+        }
+    }
 
     private sealed class UpdateProgress
     {
@@ -312,17 +356,21 @@ internal sealed class LanLauncher : Form
         }
     }
 
-    private async Task CheckForUpdate()
+    private async Task CheckForUpdate(bool applyUpdateSilently)
     {
         UpdateInfo latest;
         try
         {
+            LogUpdate("fetch update manifest from " + UpdateUrl);
             latest = await Task.Run(() => FetchUpdate());
+            LogUpdate("manifest fetched: v" + latest.Version + " url=" + latest.Url);
         }
         catch (InvalidDataException invalid)
         {
-            MessageBox.Show("更新清单验证失败，已拒绝自动更新：\n" + invalid.Message,
-                "Mini Battlegrounds", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            LogUpdate("manifest signature REJECTED: " + invalid.Message);
+            if (!applyUpdateSilently)
+                MessageBox.Show("更新清单验证失败，已拒绝自动更新：\n" + invalid.Message,
+                    "Mini Battlegrounds", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
         catch
@@ -331,7 +379,7 @@ internal sealed class LanLauncher : Form
         }
         if (latest == null || !IsNewer(latest.Version, LocalVersion()))
             return;
-        if (MessageBox.Show(
+        if (!applyUpdateSilently && MessageBox.Show(
                 "发现新版本 v" + latest.Version + "（当前 v" + LocalVersion() + "）。\n是否现在从 ECS 下载并自动更新？",
                 "Mini Battlegrounds", MessageBoxButtons.YesNo, MessageBoxIcon.Information) != DialogResult.Yes)
             return;
@@ -348,6 +396,7 @@ internal sealed class LanLauncher : Form
             }
             catch (Exception exception)
             {
+                LogUpdate("apply failed: " + exception.GetType().Name + " " + exception.Message);
                 error = exception.Message;
             }
             finally
@@ -368,10 +417,12 @@ internal sealed class LanLauncher : Form
         }
         if (error != null)
         {
-            MessageBox.Show("自动更新失败：\n" + error, "Mini Battlegrounds");
+            if (!applyUpdateSilently)
+                MessageBox.Show("自动更新失败：\n" + error, "Mini Battlegrounds");
             return;
         }
-        MessageBox.Show("更新程序已启动，启动器将自动重启。", "Mini Battlegrounds");
+        if (!applyUpdateSilently)
+            MessageBox.Show("更新程序已启动，启动器将自动重启。", "Mini Battlegrounds");
         Close();
     }
 
