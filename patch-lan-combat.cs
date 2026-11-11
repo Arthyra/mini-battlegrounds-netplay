@@ -1214,9 +1214,15 @@ internal static class PatchCombat
         var objectToString = module.ImportReference(typeof(object).GetMethod("ToString", Type.EmptyTypes));
         var tickCount = module.ImportReference(typeof(Environment).GetProperty("TickCount").GetGetMethod());
         var appendAllText = module.ImportReference(typeof(System.IO.File).GetMethod("AppendAllText", new[] { typeof(string), typeof(string) }));
+        var exceptionType = module.ImportReference(typeof(Exception));
         // Value types must be boxed before a virtual ToString call: raw
         // callvirt on a stack value is invalid IL for the Unity Mono JIT.
-        traceIl.Emit(OpCodes.Ldstr, "mbg-reconnect.log");
+        // The whole write is guarded: a trace probe must never break the
+        // game (two clients share the log path and race on it).
+        var tryStart = traceIl.Create(OpCodes.Ldstr, "mbg-reconnect.log");
+        var traceRet = traceIl.Create(OpCodes.Ret);
+        var catchStart = traceIl.Create(OpCodes.Pop);
+        traceIl.Append(tryStart);
         traceIl.Emit(OpCodes.Call, tickCount);
         traceIl.Emit(OpCodes.Box, core.Int32);
         traceIl.Emit(OpCodes.Callvirt, objectToString);
@@ -1233,7 +1239,18 @@ internal static class PatchCombat
         traceIl.Emit(OpCodes.Ldstr, "\n");
         traceIl.Emit(OpCodes.Call, concat2);
         traceIl.Emit(OpCodes.Call, appendAllText);
-        traceIl.Emit(OpCodes.Ret);
+        traceIl.Emit(OpCodes.Leave, traceRet);
+        traceIl.Append(catchStart);
+        traceIl.Emit(OpCodes.Leave, traceRet);
+        traceIl.Append(traceRet);
+        trace.Body.ExceptionHandlers.Add(new ExceptionHandler(ExceptionHandlerType.Catch)
+        {
+            CatchType = exceptionType,
+            TryStart = tryStart,
+            TryEnd = catchStart,
+            HandlerStart = catchStart,
+            HandlerEnd = traceRet,
+        });
 
         // Operand references lifted from the original OnDisconnect giving-up
         // path so the reconnect tick can exit the same way (StageLogin + 10107).
@@ -1648,6 +1665,37 @@ internal static class PatchCombat
         loginIl.InsertBefore(originalLogin, loginIl.Create(OpCodes.Stsfld, givingUp));
         loginIl.InsertBefore(originalLogin, loginIl.Create(OpCodes.Ldc_I4_0));
         loginIl.InsertBefore(originalLogin, loginIl.Create(OpCodes.Stsfld, pending));
+
+        // The reconnect path re-enters the battle stage, which re-runs
+        // CameraController.SetupHighlighting while the persistent Main Camera
+        // already carries a HighlightingRenderer: AddComponent returns null
+        // and the null receiver NREs every frame. Skip setup when present.
+        var camera = module.GetType("CS.CameraController");
+        var setupHighlighting = Method(camera, "SetupHighlighting");
+        var addComponent = setupHighlighting.Body.Instructions.FirstOrDefault(i =>
+            (i.OpCode == OpCodes.Call || i.OpCode == OpCodes.Callvirt) &&
+            i.Operand is GenericInstanceMethod &&
+            ((GenericInstanceMethod)i.Operand).Name == "AddComponent");
+        if (addComponent != null)
+        {
+            var highlightType = module.ImportReference(((GenericInstanceMethod)addComponent.Operand).GenericArguments[0]);
+            var cameraIl = setupHighlighting.Body.GetILProcessor();
+            var entry = setupHighlighting.Body.Instructions[0];
+            var resume = cameraIl.Create(OpCodes.Nop);
+            var engineComponent = engine.GetType("UnityEngine.Component");
+            var getComponent = module.ImportReference(engineComponent.Methods.First(m =>
+                m.Name == "GetComponent" && m.Parameters.Count == 1 &&
+                m.Parameters[0].ParameterType.FullName == "System.Type"));
+            var typeFromHandle = module.ImportReference(typeof(Type).GetMethod("GetTypeFromHandle"));
+            cameraIl.InsertBefore(entry, cameraIl.Create(OpCodes.Ldarg_0));
+            cameraIl.InsertBefore(entry, cameraIl.Create(OpCodes.Ldfld, camera.Fields.Single(f => f.Name == "mCamera")));
+            cameraIl.InsertBefore(entry, cameraIl.Create(OpCodes.Ldtoken, highlightType));
+            cameraIl.InsertBefore(entry, cameraIl.Create(OpCodes.Call, typeFromHandle));
+            cameraIl.InsertBefore(entry, cameraIl.Create(OpCodes.Callvirt, getComponent));
+            cameraIl.InsertBefore(entry, cameraIl.Create(OpCodes.Brfalse, resume));
+            cameraIl.InsertBefore(entry, cameraIl.Create(OpCodes.Ret));
+            cameraIl.InsertBefore(entry, resume);
+        }
 
     }
 
