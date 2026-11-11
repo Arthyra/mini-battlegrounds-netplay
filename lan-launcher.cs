@@ -395,7 +395,10 @@ internal sealed class LanLauncher : Form
             info.Version + "\n" + info.Url + "\n" + info.Sha256.ToLowerInvariant() + "\n");
         try
         {
-            using (var rsa = new RSACryptoServiceProvider())
+            // The legacy PROV_RSA_FULL CSP may reject SHA256 with
+            // "Invalid algorithm specified" on .NET Framework.
+            // PROV_RSA_AES (24) supports SHA-2 RSA signatures on Windows.
+            using (var rsa = new RSACryptoServiceProvider(new CspParameters(24)))
             {
                 rsa.PersistKeyInCsp = false;
                 rsa.ImportParameters(new RSAParameters {
