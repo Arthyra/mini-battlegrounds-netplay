@@ -592,6 +592,12 @@ internal sealed class LanLauncher : Form
             if (!File.Exists(Path.Combine(staging, "Updater.exe")))
                 throw new InvalidDataException("更新包缺少 Updater.exe。");
             progress.Report(new UpdateProgress { Percent = 95, Text = "准备独立更新器…" });
+            // Downloaded files carry Mark-of-the-Web; every later launch
+            // would trigger a security warning. Strip it while staging.
+            foreach (var file in Directory.EnumerateFiles(staging, "*", SearchOption.AllDirectories))
+            {
+                try { File.Delete(file + ":Zone.Identifier"); } catch { }
+            }
             return staging;
         }
         catch

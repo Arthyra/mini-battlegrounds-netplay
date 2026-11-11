@@ -138,6 +138,7 @@ internal sealed class Updater : Form
                 if (File.Exists(destination))
                     try { File.SetAttributes(destination, FileAttributes.Normal); } catch { }
                 File.Copy(files[i], destination, true);
+                try { File.Delete(destination + ":Zone.Identifier"); } catch { }
                 Set("正在安装：" + relative, 15 + (i + 1) * 78 / count);
             }
             try
