@@ -610,7 +610,9 @@ internal sealed class LanLauncher : Form
             throw new InvalidDataException("更新包缺少 Updater.exe。");
         var root = AppDomain.CurrentDomain.BaseDirectory;
         StopOwnServers(Path.Combine(root, "server", "server.exe"));
-        var updater = Path.Combine(Path.GetTempPath(), "mbg-updater-" + Guid.NewGuid().ToString("N") + ".exe");
+        // Run the updater from the staging directory: security suites block
+        // unsigned exes materialising in %TEMP%.
+        var updater = Path.Combine(staging, "mbg-updater.exe");
         File.Copy(updaterSource, updater, true);
         var launcherName = Path.GetFileName(Application.ExecutablePath);
         var job = Path.Combine(root, "update-job.txt");
