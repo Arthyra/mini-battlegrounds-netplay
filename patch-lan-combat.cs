@@ -1699,6 +1699,505 @@ internal static class PatchCombat
 
     }
 
+    private static void InstallScoreboard(ModuleDefinition module)
+    {
+        var world = module.GetType("CS.WorldServerProxy");
+        var core = module.TypeSystem;
+        var field = new FieldDefinition("LanScoreText",
+            FieldAttributes.Public | FieldAttributes.Static, core.String);
+        world.Fields.Add(field);
+
+        var battle = module.GetType("CS.Battle");
+        var disconnectedField = world.Fields.FirstOrDefault(f => f.Name == "LanBattleClosed");
+        if (disconnectedField == null)
+        {
+            disconnectedField = new FieldDefinition("LanBattleClosed",
+                FieldAttributes.Public | FieldAttributes.Static, core.Boolean);
+            world.Fields.Add(disconnectedField);
+        }
+        foreach (var name in new[] { "HandleBattleClose", "HandleBattleBegin" })
+        {
+            var method = battle.Methods.FirstOrDefault(m => m.Name == name);
+            if (method == null)
+                continue;
+            var b = method.Body.GetILProcessor();
+            b.InsertBefore(method.Body.Instructions[0],
+                b.Create(name == "HandleBattleClose" ? OpCodes.Ldc_I4_1 : OpCodes.Ldc_I4_0));
+            b.InsertBefore(method.Body.Instructions[1], b.Create(OpCodes.Stsfld, disconnectedField));
+        }
+        var handle = battle.Methods.Single(m => m.Name == "HandleMessages");
+        var il = handle.Body.GetILProcessor();
+        var original = handle.Body.Instructions[0];
+        var data = new VariableDefinition(new ArrayType(core.Byte));
+        handle.Body.Variables.Add(data);
+        var readBytes = module.ImportReference(typeof(System.IO.BinaryReader).GetMethod("ReadBytes", new[] { typeof(int) }));
+        var baseStream = module.ImportReference(typeof(System.IO.BinaryReader).GetProperty("BaseStream").GetGetMethod());
+        var length = module.ImportReference(typeof(System.IO.Stream).GetProperty("Length").GetGetMethod());
+        var position = module.ImportReference(typeof(System.IO.Stream).GetProperty("Position").GetGetMethod());
+        var utf8 = module.ImportReference(typeof(System.Text.Encoding).GetProperty("UTF8").GetGetMethod());
+        var getString = module.ImportReference(typeof(System.Text.Encoding).GetMethod("GetString", new[] { typeof(byte[]) }));
+
+        il.InsertBefore(original, il.Create(OpCodes.Ldarg_1));
+        il.InsertBefore(original, il.Create(OpCodes.Ldc_I4, 216));
+        il.InsertBefore(original, il.Create(OpCodes.Bne_Un, original));
+        il.InsertBefore(original, il.Create(OpCodes.Ldarg_2));
+        il.InsertBefore(original, il.Create(OpCodes.Ldarg_2));
+        il.InsertBefore(original, il.Create(OpCodes.Callvirt, baseStream));
+        il.InsertBefore(original, il.Create(OpCodes.Callvirt, length));
+        il.InsertBefore(original, il.Create(OpCodes.Conv_I4));
+        il.InsertBefore(original, il.Create(OpCodes.Ldarg_2));
+        il.InsertBefore(original, il.Create(OpCodes.Callvirt, baseStream));
+        il.InsertBefore(original, il.Create(OpCodes.Callvirt, position));
+        il.InsertBefore(original, il.Create(OpCodes.Conv_I4));
+        il.InsertBefore(original, il.Create(OpCodes.Sub));
+        il.InsertBefore(original, il.Create(OpCodes.Callvirt, readBytes));
+        il.InsertBefore(original, il.Create(OpCodes.Stloc, data));
+        il.InsertBefore(original, il.Create(OpCodes.Call, utf8));
+        il.InsertBefore(original, il.Create(OpCodes.Ldloc, data));
+        il.InsertBefore(original, il.Create(OpCodes.Callvirt, getString));
+        il.InsertBefore(original, il.Create(OpCodes.Stsfld, field));
+        il.InsertBefore(original, il.Create(OpCodes.Ret));
+    }
+    private static void InstallHideTips(ModuleDefinition module)
+    {
+        var tip = module.GetType("CS.GUIEntityBattleTip");
+        if (tip == null)
+            return;
+        foreach (var name in new[] { "Initialise", "Update", "Pop", "AdjustItems" })
+        {
+            var method = tip.Methods.FirstOrDefault(m => m.Name == name);
+            if (method == null)
+                continue;
+            var il = method.Body.GetILProcessor();
+            method.Body.ExceptionHandlers.Clear();
+            method.Body.Instructions.Clear();
+            method.Body.Variables.Clear();
+            il.Emit(OpCodes.Ret);
+        }
+    }
+
+    private static void InstallUdpFallback(ModuleDefinition module)
+    {
+        var battle = module.GetType("CS.Battle");
+        var loaded = battle.Methods.FirstOrDefault(m => m.Name == "HandleBattleLoaded");
+        var manager = module.GetType("CS.ServerProxyManager");
+        var gui = module.GetType("CS.GUISystem");
+        var messageType = module.GetType("CS.GUIEntityBattleMessage");
+        if (loaded == null || manager == null || gui == null || messageType == null)
+            return;
+        var connectDef = manager.Methods.FirstOrDefault(m => m.Name == "ConnectToBattleUdpServer" &&
+            m.Parameters.Count == 2);
+        var getEntityDef = gui.Methods.FirstOrDefault(m => m.Name == "GetEntity" && m.HasGenericParameters);
+        var handlerDef = messageType.Methods.FirstOrDefault(m => m.Name == "HandleSystemMessage" &&
+            m.Parameters.Count == 1 && m.Parameters[0].ParameterType.FullName == "System.String");
+        if (connectDef == null || getEntityDef == null || handlerDef == null)
+            return;
+        var connect = loaded.Body.Instructions.FirstOrDefault(i =>
+            (i.OpCode == OpCodes.Call || i.OpCode == OpCodes.Callvirt) && i.Operand == connectDef);
+        if (connect == null)
+            return;
+        var helper = new MethodDefinition("ConnectLanBattleUdp", MethodAttributes.Public, module.TypeSystem.Boolean);
+        helper.Parameters.Add(new ParameterDefinition("address", ParameterAttributes.None, module.TypeSystem.String));
+        helper.Parameters.Add(new ParameterDefinition("port", ParameterAttributes.None, module.TypeSystem.Int32));
+        manager.Methods.Add(helper);
+        var attempt = new VariableDefinition(module.TypeSystem.Int32);
+        helper.Body.Variables.Add(attempt);
+        var hi = helper.Body.GetILProcessor();
+        var loop = hi.Create(OpCodes.Nop);
+        var success = hi.Create(OpCodes.Ldc_I4_1);
+        var fail = hi.Create(OpCodes.Ldc_I4_0);
+        hi.Emit(OpCodes.Ldc_I4_0);
+        hi.Emit(OpCodes.Stloc, attempt);
+        hi.Append(loop);
+        hi.Emit(OpCodes.Ldarg_0);
+        hi.Emit(OpCodes.Ldarg_1);
+        hi.Emit(OpCodes.Ldarg_2);
+        hi.Emit(OpCodes.Callvirt, module.ImportReference(connectDef));
+        hi.Emit(OpCodes.Brtrue, success);
+        hi.Emit(OpCodes.Ldc_I4, 300);
+        hi.Emit(OpCodes.Call, module.ImportReference(typeof(System.Threading.Thread).GetMethod("Sleep", new[] { typeof(int) })));
+        hi.Emit(OpCodes.Ldloc, attempt);
+        hi.Emit(OpCodes.Ldc_I4_1);
+        hi.Emit(OpCodes.Add);
+        hi.Emit(OpCodes.Dup);
+        hi.Emit(OpCodes.Stloc, attempt);
+        hi.Emit(OpCodes.Ldc_I4_3);
+        hi.Emit(OpCodes.Blt, loop);
+        hi.Append(fail);
+        hi.Emit(OpCodes.Ret);
+        hi.Append(success);
+        hi.Emit(OpCodes.Ret);
+        connect.OpCode = OpCodes.Callvirt;
+        connect.Operand = helper;
+
+        var getEntity = new GenericInstanceMethod(module.ImportReference(getEntityDef));
+        getEntity.GenericArguments.Add(messageType);
+        var il = loaded.Body.GetILProcessor();
+        var warning = il.Create(OpCodes.Nop);
+        il.Append(warning);
+        il.Append(il.Create(OpCodes.Call, module.ImportReference(gui.Methods.Single(m => m.Name == "get_Instance"))));
+        il.Append(il.Create(OpCodes.Callvirt, getEntity));
+        il.Append(il.Create(OpCodes.Ldstr, "UDP 43135 未连接，移动同步可能失效；请检查防火墙/UDP 端口。"));
+        il.Append(il.Create(OpCodes.Callvirt, module.ImportReference(handlerDef)));
+        il.Append(il.Create(OpCodes.Ret));
+        var branch = loaded.Body.Instructions.SkipWhile(i => i != connect).FirstOrDefault(i => i.OpCode == OpCodes.Brfalse);
+        if (branch != null)
+            branch.Operand = warning;
+    }
+
+    private static void InstallUdpStats(ModuleDefinition module)
+    {
+        var tcp = module.GetType("CS.TcpServerProxy");
+        var battle = module.GetType("CS.Battle");
+        var udp = module.GetType("CS.BattleUdpServerProxy");
+        var manager = module.GetType("CS.ServerProxyManager");
+        var packetType = module.GetType("CS.BattleUdpPacket");
+        var packet = module.GetType("CS.NetPacket");
+        var buffer = module.GetType("CS.NetBuffer");
+        var peer = module.GetType("CS.TcpPeer");
+        if (tcp == null || udp == null || manager == null || packetType == null)
+            return;
+        var rtt = new FieldDefinition("LanUdpRtt", FieldAttributes.Public | FieldAttributes.Static, module.TypeSystem.Single);
+        var sent = new FieldDefinition("LanUdpSent", FieldAttributes.Public | FieldAttributes.Static, module.TypeSystem.Int32);
+        var recv = new FieldDefinition("LanUdpRecv", FieldAttributes.Public | FieldAttributes.Static, module.TypeSystem.Int32);
+        var loss = new FieldDefinition("LanUdpLoss", FieldAttributes.Public | FieldAttributes.Static, module.TypeSystem.Int32);
+        var pingEnabled = new FieldDefinition("LanUdpPingEnabled", FieldAttributes.Public | FieldAttributes.Static, module.TypeSystem.Boolean);
+        tcp.Fields.Add(rtt);
+        tcp.Fields.Add(sent);
+        tcp.Fields.Add(recv);
+        tcp.Fields.Add(loss);
+        tcp.Fields.Add(pingEnabled);
+        var loaded = battle.Methods.FirstOrDefault(m => m.Name == "HandleBattleLoaded");
+        if (loaded != null)
+        {
+            var loadedFirst = loaded.Body.Instructions[0];
+            loaded.Body.GetILProcessor().InsertBefore(loadedFirst, loaded.Body.GetILProcessor().Create(OpCodes.Ldc_I4_1));
+            loaded.Body.GetILProcessor().InsertBefore(loadedFirst, loaded.Body.GetILProcessor().Create(OpCodes.Stsfld, pingEnabled));
+        }
+        var engine = module.AssemblyResolver.Resolve(module.AssemblyReferences.Single(a => a.Name == "UnityEngine")).MainModule;
+        var getTime = module.ImportReference(Method(engine.GetType("UnityEngine.Time"), "get_time"));
+
+        var ack = new MethodDefinition("LanUdpAck", MethodAttributes.Public | MethodAttributes.Static, module.TypeSystem.Void);
+        ack.Parameters.Add(new ParameterDefinition("data", ParameterAttributes.None, new ArrayType(module.TypeSystem.Byte)));
+        tcp.Methods.Add(ack);
+        var ai = ack.Body.GetILProcessor();
+        var ackRet = ai.Create(OpCodes.Ret);
+        ai.Emit(OpCodes.Ldarg_0);
+        ai.Emit(OpCodes.Ldc_I4_2);
+        ai.Emit(OpCodes.Call, module.ImportReference(typeof(BitConverter).GetMethod("ToUInt16", new[] { typeof(byte[]), typeof(int) })));
+        ai.Emit(OpCodes.Ldc_I4, 209);
+        ai.Emit(OpCodes.Bne_Un, ackRet);
+        ai.Emit(OpCodes.Ldarg_0);
+        ai.Emit(OpCodes.Ldc_I4, 18);
+        ai.Emit(OpCodes.Call, module.ImportReference(typeof(BitConverter).GetMethod("ToSingle", new[] { typeof(byte[]), typeof(int) })));
+        ai.Emit(OpCodes.Stloc_0);
+        ai.Emit(OpCodes.Call, getTime);
+        ai.Emit(OpCodes.Ldloc_0);
+        ai.Emit(OpCodes.Sub);
+        ai.Emit(OpCodes.Stsfld, rtt);
+        ai.Emit(OpCodes.Ldsfld, recv);
+        ai.Emit(OpCodes.Ldc_I4_1);
+        ai.Emit(OpCodes.Add);
+        ai.Emit(OpCodes.Stsfld, recv);
+        ai.Emit(OpCodes.Ldsfld, sent);
+        ai.Emit(OpCodes.Ldsfld, recv);
+        ai.Emit(OpCodes.Sub);
+        ai.Emit(OpCodes.Ldc_I4, 100);
+        ai.Emit(OpCodes.Mul);
+        ai.Emit(OpCodes.Ldsfld, sent);
+        ai.Emit(OpCodes.Div);
+        ai.Emit(OpCodes.Stsfld, loss);
+        ai.Append(ackRet);
+        ack.Body.Variables.Add(new VariableDefinition(module.TypeSystem.Single));
+
+        var send = new MethodDefinition("LanUdpPing", MethodAttributes.Public | MethodAttributes.Static, module.TypeSystem.Void);
+        tcp.Methods.Add(send);
+        var si = send.Body.GetILProcessor();
+        var request = new VariableDefinition(packet);
+        var pingRet = si.Create(OpCodes.Ret);
+        send.Body.Variables.Add(request);
+        var localPlayer = module.GetType("CS.LocalPlayer");
+        si.Emit(OpCodes.Call, Method(localPlayer, "get_Instance"));
+        si.Emit(OpCodes.Brfalse, pingRet);
+        si.Emit(OpCodes.Call, Method(localPlayer, "get_Instance"));
+        si.Emit(OpCodes.Callvirt, Method(localPlayer, "GetDUID"));
+        si.Emit(OpCodes.Brfalse, pingRet);
+        si.Emit(OpCodes.Call, Method(manager, "get_Instance"));
+        si.Emit(OpCodes.Callvirt, Method(manager, "GetBattleUdpServerProxy"));
+        si.Emit(OpCodes.Brfalse, pingRet);
+        si.Emit(OpCodes.Ldc_I4, 210);
+        si.Emit(OpCodes.Newobj, Method(packetType, ".ctor", "CS.NetMessage"));
+        si.Emit(OpCodes.Stloc, request);
+        si.Emit(OpCodes.Ldloc, request);
+        si.Emit(OpCodes.Call, getTime);
+        si.Emit(OpCodes.Callvirt, Method(packet, "Push", "System.Single"));
+        si.Emit(OpCodes.Ldloc, request);
+        si.Emit(OpCodes.Callvirt, Method(packet, "UpdateHeader"));
+        si.Emit(OpCodes.Call, Method(manager, "get_Instance"));
+        si.Emit(OpCodes.Callvirt, Method(manager, "GetBattleUdpServerProxy"));
+        si.Emit(OpCodes.Ldloc, request);
+        si.Emit(OpCodes.Callvirt, Method(buffer, "get_Base"));
+        si.Emit(OpCodes.Callvirt, Method(peer, "Send", "System.Byte[]"));
+        si.Emit(OpCodes.Ldsfld, sent);
+        si.Emit(OpCodes.Ldc_I4_1);
+        si.Emit(OpCodes.Add);
+        si.Emit(OpCodes.Stsfld, sent);
+        si.Append(pingRet);
+
+        // Hook the existing 2-second TCP ping so a UDP probe is sent alongside it.
+        var update = tcp.Methods.FirstOrDefault(m => m.Name == "UpdatePing" && m.Parameters.Count == 1);
+        if (update != null)
+        {
+            var requestPing = update.Body.Instructions.FirstOrDefault(i =>
+                (i.OpCode == OpCodes.Call || i.OpCode == OpCodes.Callvirt) &&
+                i.Operand is MethodReference && ((MethodReference)i.Operand).Name == "RequestPing");
+            if (requestPing != null)
+                update.Body.GetILProcessor().InsertAfter(requestPing, update.Body.GetILProcessor().Create(OpCodes.Call, send));
+        }
+        var onReceive = udp.Methods.FirstOrDefault(m => m.Name == "OnReceive");
+        if (onReceive != null)
+        {
+            var first = onReceive.Body.Instructions[0];
+            onReceive.Body.GetILProcessor().InsertBefore(first, onReceive.Body.GetILProcessor().Create(OpCodes.Ldarg_1));
+            onReceive.Body.GetILProcessor().InsertBefore(first, onReceive.Body.GetILProcessor().Create(OpCodes.Call, ack));
+        }
+        var getLatency = tcp.Methods.FirstOrDefault(m => m.Name == "GetLatency" && m.Parameters.Count == 0);
+        if (getLatency != null)
+        {
+            var g = getLatency.Body.GetILProcessor();
+            getLatency.Body.Instructions.Clear();
+            getLatency.Body.Variables.Clear();
+            g.Emit(OpCodes.Ldsfld, rtt);
+            g.Emit(OpCodes.Ret);
+        }
+        var local = module.GetType("CS.LocalController");
+        if (local != null)
+        {
+            var nextPing = new FieldDefinition("LanUdpNextPing", FieldAttributes.Public | FieldAttributes.Static, module.TypeSystem.Single);
+            local.Fields.Add(nextPing);
+            var tick = new MethodDefinition("LanUdpTick", MethodAttributes.Private | MethodAttributes.Static, module.TypeSystem.Void);
+            local.Methods.Add(tick);
+            var ti = tick.Body.GetILProcessor();
+            var tickRet = ti.Create(OpCodes.Ret);
+            ti.Emit(OpCodes.Ldsfld, pingEnabled);
+            ti.Emit(OpCodes.Brfalse, tickRet);
+            ti.Emit(OpCodes.Call, getTime);
+            ti.Emit(OpCodes.Ldsfld, nextPing);
+            ti.Emit(OpCodes.Blt, tickRet);
+            ti.Emit(OpCodes.Call, getTime);
+            ti.Emit(OpCodes.Ldc_R4, 2f);
+            ti.Emit(OpCodes.Add);
+            ti.Emit(OpCodes.Stsfld, nextPing);
+            ti.Emit(OpCodes.Call, send);
+            ti.Append(tickRet);
+            var localUpdate = local.Methods.FirstOrDefault(m => m.Name == "Update");
+            if (update != null)
+            {
+                var first = localUpdate.Body.Instructions[0];
+                localUpdate.Body.GetILProcessor().InsertBefore(first, localUpdate.Body.GetILProcessor().Create(OpCodes.Call, tick));
+            }
+        }
+        var getLoss = tcp.Methods.FirstOrDefault(m => m.Name == "GetPacketLoss" && m.Parameters.Count == 0);
+        if (getLoss != null)
+        {
+            var g = getLoss.Body.GetILProcessor();
+            getLoss.Body.Instructions.Clear();
+            getLoss.Body.Variables.Clear();
+            g.Emit(OpCodes.Ldsfld, loss);
+            g.Emit(OpCodes.Ret);
+        }
+    }
+
+    private static void InstallLanUdpWarning(ModuleDefinition module)
+    {
+        var world = module.GetType("CS.WorldServerProxy");
+        var udp = module.GetType("CS.BattleUdpServerProxy");
+        var battle = module.GetType("CS.Battle");
+        var local = module.GetType("CS.LocalController");
+        var system = module.GetType("CS.GUIEntitySystemMessage");
+        var gui = module.GetType("CS.GUISystem");
+        var defines = module.GetType("CS.Defines");
+        var engine = module.AssemblyResolver.Resolve(module.AssemblyReferences.Single(a => a.Name == "UnityEngine")).MainModule;
+        var getTime = module.ImportReference(Method(engine.GetType("UnityEngine.Time"), "get_time"));
+        var udpOnReceive = udp == null ? null : udp.Methods.FirstOrDefault(m => m.Name == "OnReceive");
+        var loaded = battle == null ? null : battle.Methods.FirstOrDefault(m => m.Name == "HandleBattleLoaded");
+        var update = local == null ? null : local.Methods.FirstOrDefault(m => m.Name == "Update");
+        var pop = system == null ? null : system.Methods.FirstOrDefault(m => m.Name == "Pop" && m.Parameters.Count == 3);
+        var getEntityDef = gui == null ? null : gui.Methods.FirstOrDefault(m => m.Name == "GetEntity" && m.HasGenericParameters);
+        if (world == null || udpOnReceive == null || loaded == null || update == null || pop == null || getEntityDef == null)
+            return;
+        var seen = new FieldDefinition("LanUdpSeen", FieldAttributes.Public | FieldAttributes.Static, module.TypeSystem.Boolean);
+        var warnAt = new FieldDefinition("LanUdpWarnAt", FieldAttributes.Public | FieldAttributes.Static, module.TypeSystem.Single);
+        world.Fields.Add(seen);
+        world.Fields.Add(warnAt);
+        var getEntity = new GenericInstanceMethod(module.ImportReference(getEntityDef));
+        getEntity.GenericArguments.Add(system);
+
+        var mark = new MethodDefinition("LanMarkUdpSeen", MethodAttributes.Private | MethodAttributes.Static, module.TypeSystem.Void);
+        local.Methods.Add(mark);
+        var mIl = mark.Body.GetILProcessor();
+        mIl.Emit(OpCodes.Ldc_I4_1);
+        mIl.Emit(OpCodes.Stsfld, seen);
+        mIl.Emit(OpCodes.Ret);
+        var onFirst = udpOnReceive.Body.Instructions[0];
+        udpOnReceive.Body.GetILProcessor().InsertBefore(onFirst, udpOnReceive.Body.GetILProcessor().Create(OpCodes.Call, mark));
+
+        var arm = new MethodDefinition("LanArmUdpWarning", MethodAttributes.Private | MethodAttributes.Static, module.TypeSystem.Void);
+        local.Methods.Add(arm);
+        var aIl = arm.Body.GetILProcessor();
+        aIl.Emit(OpCodes.Call, getTime);
+        aIl.Emit(OpCodes.Ldc_R4, 2f);
+        aIl.Emit(OpCodes.Add);
+        aIl.Emit(OpCodes.Stsfld, warnAt);
+        aIl.Emit(OpCodes.Ret);
+        var loadedFirst = loaded.Body.Instructions[0];
+        loaded.Body.GetILProcessor().InsertBefore(loadedFirst, loaded.Body.GetILProcessor().Create(OpCodes.Call, arm));
+
+        var check = new MethodDefinition("LanCheckUdp", MethodAttributes.Private | MethodAttributes.Static, module.TypeSystem.Void);
+        local.Methods.Add(check);
+        var cIl = check.Body.GetILProcessor();
+        var ret = cIl.Create(OpCodes.Ret);
+        cIl.Emit(OpCodes.Ldsfld, warnAt);
+        cIl.Emit(OpCodes.Ldc_R4, 0f);
+        cIl.Emit(OpCodes.Ble, ret);
+        cIl.Emit(OpCodes.Ldsfld, seen);
+        cIl.Emit(OpCodes.Brtrue, ret);
+        cIl.Emit(OpCodes.Call, getTime);
+        cIl.Emit(OpCodes.Ldsfld, warnAt);
+        cIl.Emit(OpCodes.Blt, ret);
+        cIl.Emit(OpCodes.Ldc_R4, 0f);
+        cIl.Emit(OpCodes.Stsfld, warnAt);
+        cIl.Emit(OpCodes.Call, module.ImportReference(gui.Methods.Single(m => m.Name == "get_Instance")));
+        cIl.Emit(OpCodes.Callvirt, getEntity);
+        cIl.Emit(OpCodes.Ldstr, "UDP 43135 未连接，移动同步可能失效；请检查防火墙/UDP 端口。");
+        cIl.Emit(OpCodes.Ldsfld, defines.Fields.Single(f => f.Name == "SystemMessageWarning"));
+        cIl.Emit(OpCodes.Ldc_I4_0);
+        cIl.Emit(OpCodes.Callvirt, pop);
+        cIl.Append(ret);
+        var updateFirst = update.Body.Instructions[0];
+        update.Body.GetILProcessor().InsertBefore(updateFirst, update.Body.GetILProcessor().Create(OpCodes.Call, check));
+    }
+
+    private static void InstallUdpChatPrompt(ModuleDefinition module)
+    {
+        var messageType = module.GetType("CS.GUIEntityBattleMessage");
+        var handler = messageType.Methods.FirstOrDefault(m => m.Name == "HandleBattleChat" &&
+            m.Parameters.Count == 3 && m.Parameters[2].ParameterType.FullName == "System.String");
+        var system = messageType.Methods.FirstOrDefault(m => m.Name == "HandleSystemMessage" &&
+            m.Parameters.Count == 1 && m.Parameters[0].ParameterType.FullName == "System.String");
+        if (handler == null || system == null)
+            return;
+        var il = handler.Body.GetILProcessor();
+        var original = handler.Body.Instructions[0];
+        var ret = il.Create(OpCodes.Ret);
+        il.InsertBefore(original, il.Create(OpCodes.Ldarg_3));
+        il.InsertBefore(original, il.Create(OpCodes.Ldstr, "UDP 43135"));
+        il.InsertBefore(original, il.Create(OpCodes.Callvirt,
+            module.ImportReference(typeof(string).GetMethod("StartsWith", new[] { typeof(string) }))));
+        il.InsertBefore(original, il.Create(OpCodes.Brfalse, original));
+        il.InsertBefore(original, il.Create(OpCodes.Ldarg_0));
+        il.InsertBefore(original, il.Create(OpCodes.Ldarg_3));
+        il.InsertBefore(original, il.Create(OpCodes.Callvirt, system));
+        il.InsertBefore(original, il.Create(OpCodes.Ret));
+    }
+
+    private static void InstallPacketLoss(ModuleDefinition module)
+    {
+        var proxy = module.GetType("CS.TcpServerProxy");
+        var recalc = proxy.Methods.FirstOrDefault(m => m.Name == "RecalcPacketLoss" && m.Parameters.Count == 0);
+        var loss = proxy.Fields.FirstOrDefault(f => f.Name == "mPacketLoss");
+        if (recalc == null || loss == null)
+            return;
+        var ret = recalc.Body.Instructions.FirstOrDefault(i => i.OpCode == OpCodes.Ret);
+        if (ret == null)
+            return;
+        var il = recalc.Body.GetILProcessor();
+        // mPacketLoss currently contains the number of lost samples. Convert it
+        // to a percentage over the sampled window so the HUD does not display
+        // 0..4 as if it were a percentage. The divisor (count - 1) is zero while
+        // at most one ping is in flight, which killed the whole Update loop at
+        // login, so skip the conversion until the window has two samples.
+        il.InsertBefore(ret, il.Create(OpCodes.Ldloc_0));
+        il.InsertBefore(ret, il.Create(OpCodes.Ldc_I4_1));
+        il.InsertBefore(ret, il.Create(OpCodes.Ble, ret));
+        il.InsertBefore(ret, il.Create(OpCodes.Ldarg_0));
+        il.InsertBefore(ret, il.Create(OpCodes.Ldarg_0));
+        il.InsertBefore(ret, il.Create(OpCodes.Ldfld, loss));
+        il.InsertBefore(ret, il.Create(OpCodes.Ldc_I4, 100));
+        il.InsertBefore(ret, il.Create(OpCodes.Mul));
+        il.InsertBefore(ret, il.Create(OpCodes.Ldloc_0));
+        il.InsertBefore(ret, il.Create(OpCodes.Ldc_I4_1));
+        il.InsertBefore(ret, il.Create(OpCodes.Sub));
+        il.InsertBefore(ret, il.Create(OpCodes.Div));
+        il.InsertBefore(ret, il.Create(OpCodes.Stfld, loss));
+    }
+
+    private static void InstallStatusRate(ModuleDefinition module)
+    {
+        // The client already interpolates UnitVisual with Lerp/Slerp in
+        // UnitVisual.UpdateInterpolation. The 10 Hz status target is the
+        // remaining stair-step source; 20 Hz fits the server's 20 Hz tick.
+        var local = module.GetType("CS.LocalController");
+        var field = local.Fields.FirstOrDefault(f => f.Name == "StatusSyncFrequency");
+        var cctor = local.Methods.FirstOrDefault(m => m.Name == ".cctor");
+        if (field == null || cctor == null)
+            return;
+        var instructions = cctor.Body.Instructions;
+        for (var i = 1; i < instructions.Count; i++)
+        {
+            if (instructions[i].OpCode == OpCodes.Stsfld && instructions[i].Operand == field &&
+                instructions[i - 1].OpCode == OpCodes.Ldc_R4 &&
+                Math.Abs((float)instructions[i - 1].Operand - 0.1f) < 0.0001f)
+                instructions[i - 1].Operand = 0.05f;
+        }
+    }
+
+    private static void InstallMountedStatus(ModuleDefinition module)
+    {
+        var local = module.GetType("CS.LocalController");
+        var update = local.Methods.FirstOrDefault(m => m.Name == "UpdateSync" && m.Parameters.Count == 1);
+        if (update == null)
+            return;
+        var instructions = update.Body.Instructions;
+        for (var i = 0; i < instructions.Count; i++)
+        {
+            if (instructions[i].OpCode == OpCodes.Callvirt &&
+                instructions[i].Operand is MethodReference &&
+                ((MethodReference)instructions[i].Operand).Name == "IsMounted")
+            {
+                // Keep the Unit on the stack balanced and remove the mounted
+                // skip so passengers also report yaw/aim.
+                instructions[i].OpCode = OpCodes.Pop;
+                instructions[i].Operand = null;
+                if (i + 1 < instructions.Count && instructions[i + 1].OpCode == OpCodes.Brtrue)
+                {
+                    instructions[i + 1].OpCode = OpCodes.Nop;
+                    instructions[i + 1].Operand = null;
+                }
+                break;
+            }
+        }
+    }
+
+    private static void InstallMountMovement(ModuleDefinition module)
+    {
+        var unit = module.GetType("CS.Unit");
+        var mount = unit.Methods.Single(m => m.Name == "Mount");
+        var calls = mount.Body.Instructions
+            .Where(i => (i.OpCode == OpCodes.Call || i.OpCode == OpCodes.Callvirt)
+                        && i.Operand is MethodReference)
+            .Where(i => ((MethodReference)i.Operand).Name == "StopMove")
+            .ToList();
+        foreach (var call in calls)
+        {
+            // StopMove is an instance method: its receiver is already on the
+            // stack. Remove only the call would leave an extra value and make
+            // the method's final ret invalid IL. Pop consumes the receiver.
+            call.OpCode = OpCodes.Pop;
+            call.Operand = null;
+        }
+    }
+
     private static void InstallVehiclePropImpact(ModuleDefinition module, TypeDefinition battle)
     {
         var handler = Method(battle, "HandleVehicleHitObstacle", "System.IO.BinaryReader");
@@ -1836,6 +2335,16 @@ internal static class PatchCombat
                 Console.WriteLine("step nickname"); InstallNickname(module);
         InstallUnitLeave(module);
         InstallReconnect(module);
+                Console.WriteLine("step scoreboard"); InstallScoreboard(module);
+                Console.WriteLine("step tips"); InstallHideTips(module);
+                Console.WriteLine("step mountmove"); InstallMountMovement(module);
+                Console.WriteLine("step mounted"); InstallMountedStatus(module);
+                Console.WriteLine("step rate"); InstallStatusRate(module);
+                Console.WriteLine("step loss"); InstallPacketLoss(module);
+                Console.WriteLine("step chat"); InstallUdpChatPrompt(module);
+                Console.WriteLine("step warn"); InstallLanUdpWarning(module);
+                Console.WriteLine("step udpstats"); InstallUdpStats(module);
+                Console.WriteLine("step udpfb"); InstallUdpFallback(module);
                 try
                 {
                     module.Write(args[1]);
