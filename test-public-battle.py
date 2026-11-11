@@ -104,16 +104,18 @@ def recv_until(sock, wanted, timeout=10):
     raise TimeoutError(wanted)
 
 
-def ensure_ready(sock, player_id, attempts=4):
-    # The server keeps room_ready on the persistent player object; a relogin
-    # can start already-ready. Read ROOM_STATE and only toggle when needed.
+def ensure_ready(sock, player_id, attempts=10):
+    # The server keeps room_ready on the persistent player object and only
+    # broadcasts ROOM_STATE after a toggle, so toggle first and read the
+    # resulting state; converge in at most two flips.
     for _ in range(attempts):
+        sock.sendall(frame(27, struct.pack("<H", 4)))
         while True:
             msg, data = recv_msg(sock)
             if msg == 210:
                 break
         count = data[1]
-        offset = 6
+        offset = 8  # BBB??? then the inner <H member count
         mine = None
         for _ in range(count):
             pid, room_ready, is_owner, nlen = struct.unpack_from("<IBBH", data, offset)
@@ -122,7 +124,7 @@ def ensure_ready(sock, player_id, attempts=4):
                 mine = room_ready
         if mine:
             return
-        sock.sendall(frame(27, struct.pack("<H", 4)))
+        time.sleep(0.3)
 
 
 def main():
@@ -144,12 +146,24 @@ def main():
     else:
         raise SystemExit("login kept failing: " + str(login_error))
     print("login", a_id, b_id)
-    ensure_ready(a, a_id)
-    ensure_ready(b, b_id)
-    time.sleep(0.3)
-    start(a)
-    a_battle, battle_id, udp_port, battle_host, battle_port = connect_battle(a, a_id)
-    b_battle, _, _, _, _ = connect_battle(b, b_id)
+    # A late finish_round from the previous round resets room_ready for
+    # everyone; retry the ready+start cycle until the assignment arrives.
+    a_battle = b_battle = None
+    battle_id = udp_port = battle_host = battle_port = None
+    for attempt in range(4):
+        ensure_ready(a, a_id)
+        ensure_ready(b, b_id)
+        time.sleep(0.3)
+        start(a)
+        try:
+            a_battle, battle_id, udp_port, battle_host, battle_port = connect_battle(a, a_id)
+            b_battle, _, _, _, _ = connect_battle(b, b_id)
+            break
+        except (TimeoutError, socket.timeout, AssertionError, ConnectionError) as start_error:
+            print("start retry", attempt, start_error)
+            time.sleep(6)
+    if a_battle is None:
+        raise TimeoutError("room never started")
     print("battle", battle_id, "udp", udp_port)
     recv_until(a_battle, {37}, timeout=5)
     recv_until(b_battle, {37}, timeout=5)
