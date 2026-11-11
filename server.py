@@ -944,6 +944,10 @@ class Match(asyncio.DatagramProtocol):
             raise
         finally:
             print(f"battle conn exit player={player.id} battle={battle_id} writer={id(writer)} peer={peer} is_current={player.battle is writer} started={self.started} ready={player.ready}", flush=True)
+            warning = getattr(player, "udp_warning", None)
+            if warning is not None:
+                warning.cancel()
+                player.udp_warning = None
             if player.battle is writer:
                 player.battle = player.udp = None
                 player.disconnected_at = time.monotonic()
@@ -959,9 +963,9 @@ class Match(asyncio.DatagramProtocol):
     async def warn_if_udp_missing(self, player, writer, battle_id):
         text = "UDP 43135 未连接，移动同步可能失效；请检查防火墙/UDP 端口。"
         data = text.encode("utf-16-le")
-        for _ in range(20):
+        for _ in range(3):
             await asyncio.sleep(1.0)
-            if self.battle_id != battle_id or player.udp is not None:
+            if self.battle_id != battle_id or player.battle is not writer or player.udp is not None:
                 return
             print(f"udp warning: player {player.id} not registered", flush=True)
             try:
@@ -973,7 +977,10 @@ class Match(asyncio.DatagramProtocol):
         print(f"battle <- 34; player {player.id} writer={id(writer)} started={self.started} ready={player.ready}", flush=True)
         writer.write(frame(34, struct.pack("<HIIHI", 0, BATTLE_UDP_PORT, player.id, 1, MAP_ID)))
         writer.write(frame(SCOREBOARD, self.score_text().encode("utf-8")))
-        asyncio.create_task(self.warn_if_udp_missing(player, writer, battle_id))
+        old_warning = getattr(player, "udp_warning", None)
+        if old_warning is not None:
+            old_warning.cancel()
+        player.udp_warning = asyncio.create_task(self.warn_if_udp_missing(player, writer, battle_id))
         if reconnect and self.started:
             # A returning player needs a snapshot; other peers do not.
             print(f"battle -> 37 reconnect player={player.id} writer={id(writer)} started={self.started} ready={player.ready}", flush=True)
@@ -989,6 +996,7 @@ class Match(asyncio.DatagramProtocol):
             writer.write(frame(39, struct.pack("<H", 0)))
             writer.write(frame(40))
             writer.write(frame(VEHICLES_SPAWN, vehicles))
+            writer.write(frame(SWITCH_WEAPON, struct.pack("<II", player.id, player.selected_id())))
         elif len(self.joined) == len(self.queued):
             await asyncio.sleep(0.5)
             if self.battle_id != battle_id or player.battle is not writer:
