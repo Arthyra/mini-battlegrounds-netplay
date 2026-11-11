@@ -104,6 +104,27 @@ def recv_until(sock, wanted, timeout=10):
     raise TimeoutError(wanted)
 
 
+def ensure_ready(sock, player_id, attempts=4):
+    # The server keeps room_ready on the persistent player object; a relogin
+    # can start already-ready. Read ROOM_STATE and only toggle when needed.
+    for _ in range(attempts):
+        while True:
+            msg, data = recv_msg(sock)
+            if msg == 210:
+                break
+        count = data[1]
+        offset = 6
+        mine = None
+        for _ in range(count):
+            pid, room_ready, is_owner, nlen = struct.unpack_from("<IBBH", data, offset)
+            offset += 8 + 34  # name is fixed-width utf-16le padded to 34
+            if pid == player_id:
+                mine = room_ready
+        if mine:
+            return
+        sock.sendall(frame(27, struct.pack("<H", 4)))
+
+
 def main():
     a = b = None
     for attempt in range(15):
@@ -123,9 +144,9 @@ def main():
     else:
         raise SystemExit("login kept failing: " + str(login_error))
     print("login", a_id, b_id)
-    ready(a)
-    ready(b)
-    time.sleep(0.2)
+    ensure_ready(a, a_id)
+    ensure_ready(b, b_id)
+    time.sleep(0.3)
     start(a)
     a_battle, battle_id, udp_port, battle_host, battle_port = connect_battle(a, a_id)
     b_battle, _, _, _, _ = connect_battle(b, b_id)
