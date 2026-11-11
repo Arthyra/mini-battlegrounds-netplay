@@ -66,6 +66,12 @@ def build(output, client, host=None, version=None):
         launcher_info.unlink(missing_ok=True)
         updater_info.unlink(missing_ok=True)
         copy_runtime(stage / "client", client)
+        # The prepared client carries read-only files from its original
+        # extraction; zipped directory entries with the read-only attribute
+        # make .NET ExtractToDirectory fail with access denied on update.
+        for dirpath, dirnames, filenames in os.walk(stage):
+            for name in dirnames + filenames:
+                os.chmod(os.path.join(dirpath, name), 0o755)
         server_source = ROOT / "dist" / "server"
         if (server_source / "server.exe").is_file():
             server_stage = stage / "server"

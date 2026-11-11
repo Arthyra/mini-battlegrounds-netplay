@@ -540,7 +540,29 @@ internal sealed class LanLauncher : Form
                 System.Threading.Thread.Sleep(1000);
             }
             progress.Report(new UpdateProgress { Percent = 80, Text = "解压更新包…" });
-            ZipFile.ExtractToDirectory(archive, staging);
+            // 360 等安全软件会在大文件解压时短暂锁定目录，瞬时拒绝需重试。
+            for (var extractAttempt = 1; ; extractAttempt++)
+            {
+                try
+                {
+                    ZipFile.ExtractToDirectory(archive, staging);
+                    break;
+                }
+                catch (UnauthorizedAccessException extractError)
+                {
+                    if (extractAttempt >= 3)
+                        throw;
+                    LogUpdate("extract attempt " + extractAttempt + " blocked, retrying: " + extractError.Message);
+                    System.Threading.Thread.Sleep(2000);
+                }
+                catch (IOException extractError)
+                {
+                    if (extractAttempt >= 3)
+                        throw;
+                    LogUpdate("extract attempt " + extractAttempt + " blocked, retrying: " + extractError.Message);
+                    System.Threading.Thread.Sleep(2000);
+                }
+            }
             try { File.Delete(archive); } catch { }
             if (!Directory.Exists(Path.Combine(staging, "client")))
                 throw new InvalidDataException("更新包缺少 client 目录。");
