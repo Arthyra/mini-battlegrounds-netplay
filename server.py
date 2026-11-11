@@ -936,7 +936,7 @@ class Match(asyncio.DatagramProtocol):
         if reconnect:
             print(f"battle reconnect <- 34; player {player.id}", flush=True)
         try:
-            await self.run_battle(player, reader, writer, battle_id)
+            await self.run_battle(player, reader, writer, battle_id, reconnect)
         finally:
             if player.battle is writer:
                 player.battle = player.udp = None
@@ -963,7 +963,7 @@ class Match(asyncio.DatagramProtocol):
             except (ConnectionError, OSError):
                 return
 
-    async def run_battle(self, player, reader, writer, battle_id):
+    async def run_battle(self, player, reader, writer, battle_id, reconnect=False):
         print(f"battle <- 34; player {player.id}", flush=True)
         writer.write(frame(34, struct.pack("<HIIHI", 0, BATTLE_UDP_PORT, player.id, 1, MAP_ID)))
         writer.write(frame(SCOREBOARD, self.score_text().encode("utf-8")))
@@ -1949,6 +1949,7 @@ if __name__ == "__main__":
                           args.owner_profile, args.admin_port, args.admin_token))
     except KeyboardInterrupt:
         pass
+
 
 
 
