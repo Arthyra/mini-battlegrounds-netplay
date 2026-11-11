@@ -1352,6 +1352,11 @@ internal static class PatchCombat
         var inProgress = new FieldDefinition("mLanReconnectInProgress",
             FieldAttributes.Private | FieldAttributes.Static, core.Boolean);
         battleProxy.Fields.Add(inProgress);
+        // Set by the (receive-thread) world disconnect handler; consumed by
+        // TickLanReconnect on the main thread, which owns stage transitions.
+        var worldDrop = new FieldDefinition("mLanWorldDropPending",
+            FieldAttributes.Private | FieldAttributes.Static, core.Boolean);
+        battleProxy.Fields.Add(worldDrop);
 
         var engine = module.AssemblyResolver.Resolve(
             module.AssemblyReferences.Single(a => a.Name == "UnityEngine")).MainModule;
@@ -1364,6 +1369,34 @@ internal static class PatchCombat
         var done = tickIl.Create(OpCodes.Ret);
         var failed = tickIl.Create(OpCodes.Nop);
         var later = tickIl.Create(OpCodes.Nop);
+        // A dead world connection must not leave a stage from its receive
+        // thread (Unity teardown off the main thread crashes the player).
+        // Consume the pending drop here on the main thread instead; the
+        // server is gone, so skip straight back to the login stage.
+        var worldEntry = tickIl.Create(OpCodes.Nop);
+        tickIl.Emit(OpCodes.Ldsfld, worldDrop);
+        tickIl.Emit(OpCodes.Brfalse, worldEntry);
+        tickIl.Emit(OpCodes.Ldc_I4_0);
+        tickIl.Emit(OpCodes.Stsfld, worldDrop);
+        tickIl.Emit(OpCodes.Ldc_I4_0);
+        tickIl.Emit(OpCodes.Stsfld, pending);
+        tickIl.Emit(OpCodes.Ldc_I4_0);
+        tickIl.Emit(OpCodes.Stsfld, givingUp);
+        tickIl.Emit(OpCodes.Call, Method(manager, "get_Instance"));
+        tickIl.Emit(OpCodes.Callvirt, Method(manager, "DisconnectAll"));
+        tickIl.Emit(OpCodes.Call, Method(module.GetType("CS.StageManager"), "get_Instance"));
+        tickIl.Emit(OpCodes.Callvirt, setCurrentStageLogin);
+        tickIl.Emit(OpCodes.Pop);
+        tickIl.Emit(OpCodes.Call, Method(module.GetType("CS.MessageboxManager"), "get_Instance"));
+        tickIl.Emit(OpCodes.Call, Method(module.GetType("CS.TextDataManager"), "get_Instance"));
+        tickIl.Emit(OpCodes.Ldc_I4, 10108);
+        tickIl.Emit(OpCodes.Ldc_I4_1);
+        tickIl.Emit(OpCodes.Callvirt, Method(module.GetType("CS.TextDataManager"), "GetData", "System.UInt32", "System.Boolean"));
+        tickIl.Emit(OpCodes.Ldc_I4_0);
+        tickIl.Emit(OpCodes.Callvirt, Method(module.GetType("CS.MessageboxManager"), "Show", "System.String", "CS.Messagebox/Buttons"));
+        tickIl.Emit(OpCodes.Pop);
+        tickIl.Emit(OpCodes.Ret);
+        tickIl.Append(worldEntry);
         tickIl.Emit(OpCodes.Ldsfld, pending);
         tickIl.Emit(OpCodes.Brfalse, done);
         tickIl.Emit(OpCodes.Call, realtime);
@@ -1628,8 +1661,8 @@ internal static class PatchCombat
         var disconnect = battleProxy.Methods.Single(m => m.Name == "OnDisconnect");
         var onDisconnect = disconnect.Body.GetILProcessor();
         var first = disconnect.Body.Instructions[0];
-        var normalExit = onDisconnect.Create(OpCodes.Nop);
         var alreadyQueued = onDisconnect.Create(OpCodes.Ret);
+        var givingUpExit = onDisconnect.Create(OpCodes.Ldstr, "od");
         InsertTrace(onDisconnect, first, trace, "od", 0);
         onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Ldc_I4_0));
         onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Stsfld, tcpActive));
@@ -1643,7 +1676,7 @@ internal static class PatchCombat
         onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Ldsfld, inProgress));
         onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Brtrue, alreadyQueued));
         onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Ldsfld, givingUp));
-        onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Brtrue, normalExit));
+        onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Brtrue, givingUpExit));
         onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Ldsfld, pending));
         onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Brtrue, alreadyQueued));
         // Run the base TcpPeer cleanup even while recovery is pending. The
@@ -1661,10 +1694,15 @@ internal static class PatchCombat
         onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Ldc_I4, 4));
         onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Call, trace));
         onDisconnect.InsertBefore(first, alreadyQueued);
-        onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Ldstr, "od"));
+        // The tick performs the giving-up exit on the main thread; a late
+        // disconnect on the receive thread only runs socket cleanup, or it
+        // would leave a stage off the main thread and crash.
+        onDisconnect.InsertBefore(first, givingUpExit);
         onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Ldc_I4, 5));
         onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Call, trace));
-        onDisconnect.InsertBefore(first, normalExit);
+        onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Ldarg_0));
+        onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Call, Method(peer, "OnDisconnect")));
+        onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Ret));
 
         // Permit normal reconnect behavior after a new lobby login.
         var login = Method(module.GetType("CS.WorldServerProxy"),
@@ -1675,6 +1713,37 @@ internal static class PatchCombat
         loginIl.InsertBefore(originalLogin, loginIl.Create(OpCodes.Stsfld, givingUp));
         loginIl.InsertBefore(originalLogin, loginIl.Create(OpCodes.Ldc_I4_0));
         loginIl.InsertBefore(originalLogin, loginIl.Create(OpCodes.Stsfld, pending));
+
+        // A world drop during a battle leaves the stage from the receive
+        // thread in the original handler, and Unity teardown off the main
+        // thread crashes the player (observed when the whole server dies).
+        // Rewrite the handler to close sockets and flag the drop only;
+        // TickLanReconnect consumes the flag on the main thread.
+        var world = module.GetType("CS.WorldServerProxy");
+        var worldDisconnect = world.Methods.Single(m => m.Name == "OnDisconnect");
+        worldDisconnect.Body.ExceptionHandlers.Clear();
+        worldDisconnect.Body.Variables.Clear();
+        worldDisconnect.Body.Instructions.Clear();
+        var worldIl = worldDisconnect.Body.GetILProcessor();
+        var dropStart = worldIl.Create(OpCodes.Nop);
+        var dropEnd = worldIl.Create(OpCodes.Nop);
+        worldIl.Emit(OpCodes.Ldarg_0);
+        worldIl.Emit(OpCodes.Call, Method(peer, "OnDisconnect"));
+        worldIl.Emit(OpCodes.Call, Method(module.GetType("CS.StageManager"), "get_Instance"));
+        worldIl.Emit(OpCodes.Callvirt, Method(module.GetType("CS.StageManager"), "GetCurrentStage"));
+        worldIl.Emit(OpCodes.Isinst, module.GetType("CS.StageHall"));
+        worldIl.Emit(OpCodes.Brtrue, dropStart);
+        worldIl.Emit(OpCodes.Call, Method(module.GetType("CS.StageManager"), "get_Instance"));
+        worldIl.Emit(OpCodes.Callvirt, Method(module.GetType("CS.StageManager"), "GetCurrentStage"));
+        worldIl.Emit(OpCodes.Isinst, module.GetType("CS.StageBattle"));
+        worldIl.Emit(OpCodes.Brfalse, dropEnd);
+        worldIl.Append(dropStart);
+        worldIl.Emit(OpCodes.Call, Method(manager, "get_Instance"));
+        worldIl.Emit(OpCodes.Callvirt, Method(manager, "DisconnectAll"));
+        worldIl.Emit(OpCodes.Ldc_I4_1);
+        worldIl.Emit(OpCodes.Stsfld, worldDrop);
+        worldIl.Append(dropEnd);
+        worldIl.Emit(OpCodes.Ret);
 
         // The reconnect path re-enters the battle stage, which re-runs
         // CameraController.SetupHighlighting while the persistent Main Camera
