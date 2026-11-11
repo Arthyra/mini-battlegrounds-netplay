@@ -1530,7 +1530,9 @@ internal static class PatchCombat
         {
             var si = shadowLoaded.Body.GetILProcessor();
             var shadowFirst = shadowLoaded.Body.Instructions[0];
-            si.InsertBefore(shadowFirst, si.Create(OpCodes.Ldc_R4, 300f));
+            // 300 renders every distant tree shadow onto the ground and read as a
+            // texture defect; 60 keeps nearby shadows without the blotches.
+            si.InsertBefore(shadowFirst, si.Create(OpCodes.Ldc_R4, 60f));
             si.InsertBefore(shadowFirst, si.Create(OpCodes.Call, setShadowDistance));
         }
 
@@ -2198,6 +2200,65 @@ internal static class PatchCombat
         }
     }
 
+    private static void InstallLanMoveResume(ModuleDefinition module)
+    {
+        // LocalController.UpdateInput only calls Move when the WASD state
+        // differs from the cached mLanMotion vector. The scope gate and the
+        // mounted skip suppress movement without touching that cache, so a
+        // key held across scoping or a ride compares equal afterwards and
+        // the input loop stays silent forever. Keep the cache zeroed while
+        // movement is suppressed; the next state change then re-fires.
+        var local = module.GetType("CS.LocalController");
+        var input = Method(local, "UpdateInput", "System.Single");
+        var scopeField = local.Fields.FirstOrDefault(f => f.Name == "mLanScopeActive");
+        var motionField = local.Fields.Single(f => f.Name == "mMotion");
+        var engine = module.AssemblyResolver.Resolve(
+            module.AssemblyReferences.Single(a => a.Name == "UnityEngine")).MainModule;
+        var zero = module.ImportReference(Method(engine.GetType("UnityEngine.Vector3"), "get_zero"));
+        var il = input.Body.GetILProcessor();
+
+        // Mounted: the IsMounted skip jumps past the whole movement block.
+        // Zero the cache on that path so dismounting re-fires the detector.
+        var mountedCall = input.Body.Instructions.First(i =>
+            i.OpCode == OpCodes.Callvirt && i.Operand is MethodReference &&
+            ((MethodReference)i.Operand).Name == "IsMounted");
+        var mountedSkip = (Instruction)mountedCall.Next.Operand;
+        var resume = il.Create(OpCodes.Br, mountedSkip);
+        var zeroBlock = new Instruction[]
+        {
+            il.Create(OpCodes.Ldarg_0),
+            il.Create(OpCodes.Call, zero),
+            il.Create(OpCodes.Stfld, motionField),
+            resume,
+        };
+        foreach (var instruction in zeroBlock)
+            il.InsertBefore(mountedSkip, instruction);
+        mountedCall.Next.OpCode = OpCodes.Brtrue;
+        mountedCall.Next.Operand = zeroBlock[0];
+
+        if (scopeField != null)
+        {
+            // Scoped: Move is gated inside LocalController.Move, but the
+            // caller still refreshes the cache afterwards. Undo that update
+            // while the scope is active.
+            var stores = input.Body.Instructions
+                .Select((instruction, index) => new { instruction, index })
+                .Where(pair => pair.instruction.OpCode == OpCodes.Stfld && pair.instruction.Operand == motionField)
+                .Select(pair => pair.instruction).ToList();
+            // UpdateInput caches the WASD vector exactly once, after the
+            // Move/StopMove decision.
+            var afterMove = stores[0];
+            var next = afterMove.Next;
+            foreach (var instruction in new[]
+                     {
+                         il.Create(OpCodes.Ldarg_0), il.Create(OpCodes.Ldfld, scopeField),
+                         il.Create(OpCodes.Brfalse, next), il.Create(OpCodes.Ldarg_0),
+                         il.Create(OpCodes.Call, zero), il.Create(OpCodes.Stfld, motionField),
+                     })
+                il.InsertBefore(next, instruction);
+        }
+    }
+
     private static void InstallVehiclePropImpact(ModuleDefinition module, TypeDefinition battle)
     {
         var handler = Method(battle, "HandleVehicleHitObstacle", "System.IO.BinaryReader");
@@ -2345,6 +2406,7 @@ internal static class PatchCombat
                 Console.WriteLine("step warn"); InstallLanUdpWarning(module);
                 Console.WriteLine("step udpstats"); InstallUdpStats(module);
                 Console.WriteLine("step udpfb"); InstallUdpFallback(module);
+        Console.WriteLine("step moveresume"); InstallLanMoveResume(module);
                 try
                 {
                     module.Write(args[1]);
