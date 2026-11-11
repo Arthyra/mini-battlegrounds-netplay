@@ -1213,8 +1213,6 @@ internal static class PatchCombat
         il.Emit(OpCodes.Ldc_I4_0);
         il.Emit(OpCodes.Stloc, attempts);
         il.Append(loop);
-        il.Emit(OpCodes.Ldc_I4, 1000);
-        il.Emit(OpCodes.Call, module.ImportReference(typeof(System.Threading.Thread).GetMethod("Sleep", new[] { typeof(int) })));
         il.Emit(OpCodes.Call, Method(manager, "get_Instance"));
         il.Emit(OpCodes.Ldloc, serverInfo);
         il.Emit(OpCodes.Ldfld, info.Fields.Single(f => f.Name == "mAddress"));
@@ -1258,20 +1256,106 @@ internal static class PatchCombat
         il.Emit(OpCodes.Add);
         il.Emit(OpCodes.Dup);
         il.Emit(OpCodes.Stloc, attempts);
-        il.Emit(OpCodes.Ldc_I4, 20);
+        il.Emit(OpCodes.Ldc_I4_1);
         il.Emit(OpCodes.Blt, loop);
         il.Append(fail);
         il.Emit(OpCodes.Ret);
 
+        // The disconnect callback may run on Unity's main thread. Keep it
+        // non-blocking: retry at most once per UpdateInput tick.
+        var pending = new FieldDefinition("mLanReconnectPending",
+            FieldAttributes.Private | FieldAttributes.Static, core.Boolean);
+        var givingUp = new FieldDefinition("mLanReconnectGivingUp",
+            FieldAttributes.Private | FieldAttributes.Static, core.Boolean);
+        var attemptsMade = new FieldDefinition("mLanReconnectAttempts",
+            FieldAttributes.Private | FieldAttributes.Static, core.Int32);
+        var retryAt = new FieldDefinition("mLanReconnectRetryAt",
+            FieldAttributes.Private | FieldAttributes.Static, core.Single);
+        battleProxy.Fields.Add(pending);
+        battleProxy.Fields.Add(givingUp);
+        battleProxy.Fields.Add(attemptsMade);
+        battleProxy.Fields.Add(retryAt);
+
+        var engine = module.AssemblyResolver.Resolve(
+            module.AssemblyReferences.Single(a => a.Name == "UnityEngine")).MainModule;
+        var realtime = module.ImportReference(
+            Method(engine.GetType("UnityEngine.Time"), "get_realtimeSinceStartup"));
+        var tick = new MethodDefinition("TickLanReconnect",
+            MethodAttributes.Public | MethodAttributes.Static, core.Void);
+        battleProxy.Methods.Add(tick);
+        var tickIl = tick.Body.GetILProcessor();
+        var done = tickIl.Create(OpCodes.Ret);
+        var failed = tickIl.Create(OpCodes.Nop);
+        var later = tickIl.Create(OpCodes.Nop);
+        tickIl.Emit(OpCodes.Ldsfld, pending);
+        tickIl.Emit(OpCodes.Brfalse, done);
+        tickIl.Emit(OpCodes.Call, realtime);
+        tickIl.Emit(OpCodes.Ldsfld, retryAt);
+        tickIl.Emit(OpCodes.Blt, done);
+        tickIl.Emit(OpCodes.Ldsfld, attemptsMade);
+        tickIl.Emit(OpCodes.Ldc_I4_1);
+        tickIl.Emit(OpCodes.Add);
+        tickIl.Emit(OpCodes.Stsfld, attemptsMade);
+        tickIl.Emit(OpCodes.Call, Method(manager, "get_Instance"));
+        tickIl.Emit(OpCodes.Callvirt, Method(manager, "GetBattleTcpServerProxy"));
+        tickIl.Emit(OpCodes.Callvirt, reconnect);
+        tickIl.Emit(OpCodes.Brfalse, failed);
+        tickIl.Emit(OpCodes.Ldc_I4_0);
+        tickIl.Emit(OpCodes.Stsfld, pending);
+        tickIl.Emit(OpCodes.Br, done);
+        tickIl.Append(failed);
+        tickIl.Emit(OpCodes.Ldsfld, attemptsMade);
+        tickIl.Emit(OpCodes.Ldc_I4_S, (sbyte)20);
+        tickIl.Emit(OpCodes.Blt, later);
+        tickIl.Emit(OpCodes.Ldc_I4_0);
+        tickIl.Emit(OpCodes.Stsfld, pending);
+        tickIl.Emit(OpCodes.Ldc_I4_1);
+        tickIl.Emit(OpCodes.Stsfld, givingUp);
+        tickIl.Emit(OpCodes.Call, Method(manager, "get_Instance"));
+        tickIl.Emit(OpCodes.Callvirt, Method(manager, "DisconnectAll"));
+        tickIl.Emit(OpCodes.Br, done);
+        tickIl.Append(later);
+        tickIl.Emit(OpCodes.Call, realtime);
+        tickIl.Emit(OpCodes.Ldc_R4, 1f);
+        tickIl.Emit(OpCodes.Add);
+        tickIl.Emit(OpCodes.Stsfld, retryAt);
+        tickIl.Append(done);
+
+        var input = Method(module.GetType("CS.LocalController"), "UpdateInput", "System.Single");
+        var inputIl = input.Body.GetILProcessor();
+        inputIl.InsertBefore(input.Body.Instructions[0], inputIl.Create(OpCodes.Call, tick));
+
+        // Bypass the original DisconnectAll path while recovery is active.
+        // Insert at entry with an empty evaluation stack, not immediately
+        // before the original callvirt (which already has an instance pushed).
         var disconnect = battleProxy.Methods.Single(m => m.Name == "OnDisconnect");
-        var body = disconnect.Body.GetILProcessor();
-        var fallback = disconnect.Body.Instructions.Single(i => i.OpCode == OpCodes.Callvirt &&
-            ((MethodReference)i.Operand).Name == "DisconnectAll");
-        var done = body.Create(OpCodes.Ret);
-        body.Append(done);
-        body.InsertBefore(fallback, body.Create(OpCodes.Ldarg_0));
-        body.InsertBefore(fallback, body.Create(OpCodes.Call, reconnect));
-        body.InsertBefore(fallback, body.Create(OpCodes.Brtrue, done));
+        var onDisconnect = disconnect.Body.GetILProcessor();
+        var first = disconnect.Body.Instructions[0];
+        var normalExit = onDisconnect.Create(OpCodes.Nop);
+        var alreadyQueued = onDisconnect.Create(OpCodes.Ret);
+        onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Ldsfld, givingUp));
+        onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Brtrue, normalExit));
+        onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Ldsfld, pending));
+        onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Brtrue, alreadyQueued));
+        onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Ldc_I4_1));
+        onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Stsfld, pending));
+        onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Ldc_I4_0));
+        onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Stsfld, attemptsMade));
+        onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Ldc_R4, 0f));
+        onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Stsfld, retryAt));
+        onDisconnect.InsertBefore(first, alreadyQueued);
+        onDisconnect.InsertBefore(first, normalExit);
+
+        // Permit normal reconnect behavior after a new lobby login.
+        var login = Method(module.GetType("CS.WorldServerProxy"),
+            "HandleLogin", "System.IO.BinaryReader");
+        var loginIl = login.Body.GetILProcessor();
+        var originalLogin = login.Body.Instructions[0];
+        loginIl.InsertBefore(originalLogin, loginIl.Create(OpCodes.Ldc_I4_0));
+        loginIl.InsertBefore(originalLogin, loginIl.Create(OpCodes.Stsfld, givingUp));
+        loginIl.InsertBefore(originalLogin, loginIl.Create(OpCodes.Ldc_I4_0));
+        loginIl.InsertBefore(originalLogin, loginIl.Create(OpCodes.Stsfld, pending));
+
     }
 
     private static void InstallVehiclePropImpact(ModuleDefinition module, TypeDefinition battle)

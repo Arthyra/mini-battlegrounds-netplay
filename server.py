@@ -920,14 +920,18 @@ class Match(asyncio.DatagramProtocol):
             raise ValueError("Unexpected first battle message")
         battle_id, world_id, player_id = struct.unpack("<IHI", payload)
         player = self.players.get(player_id)
-        if (battle_id, world_id) != (self.battle_id, WORLD_ID) or player not in self.queued or player.battle is not None:
-            raise ValueError("Unknown or duplicate battle player")
+        if (battle_id, world_id) != (self.battle_id, WORLD_ID) or player not in self.queued:
+            raise ValueError("Unknown battle player")
         reconnect = player in self.joined
-        if reconnect and not player.disconnected_at:
-            raise ValueError("Duplicate battle player")
+        if player.battle is not None:
+            if not reconnect:
+                raise ValueError("Duplicate initial battle connection")
+            # A stale half-open TCP connection must not block reconnect forever.
+            player.battle.close()
         if not reconnect:
             self.joined.append(player)
         player.battle = writer
+        player.udp = None  # Re-register UDP after every battle TCP reconnect.
         player.disconnected_at = 0.0
         if reconnect:
             print(f"battle reconnect <- 34; player {player.id}", flush=True)
@@ -936,12 +940,14 @@ class Match(asyncio.DatagramProtocol):
         finally:
             if player.battle is writer:
                 player.battle = player.udp = None
+                player.disconnected_at = time.monotonic()
+                player.firing = False
+                player.reload_at = 0.0
                 if not self.started:
-                    self.finish_round("a player disconnected while loading")
+                    # Preserve the loading window instead of invalidating battle_id.
+                    player.ready = False
+                    print(f"battle disconnected while loading; waiting for player {player.id}", flush=True)
                 else:
-                    player.disconnected_at = time.monotonic()
-                    player.firing = False
-                    player.reload_at = 0.0
                     print(f"battle disconnected; waiting for player {player.id}", flush=True)
 
     async def warn_if_udp_missing(self, player, writer, battle_id):
@@ -962,16 +968,20 @@ class Match(asyncio.DatagramProtocol):
         writer.write(frame(34, struct.pack("<HIIHI", 0, BATTLE_UDP_PORT, player.id, 1, MAP_ID)))
         writer.write(frame(SCOREBOARD, self.score_text().encode("utf-8")))
         asyncio.create_task(self.warn_if_udp_missing(player, writer, battle_id))
-        if len(self.joined) == len(self.queued):
+        if reconnect and self.started:
+            # A returning player needs a snapshot; other peers do not.
+            writer.write(frame(37, self.battle_snapshot()))
+        elif len(self.joined) == len(self.queued):
             await asyncio.sleep(0.5)
-            if self.battle_id != battle_id:
+            if self.battle_id != battle_id or player.battle is not writer:
                 return
             snapshot = frame(37, self.battle_snapshot())
             for member in self.joined:
-                member.battle.write(snapshot)
-        while self.battle_id == battle_id:
+                if member.battle is not None and not member.battle.is_closing():
+                    member.battle.write(snapshot)
+        while self.battle_id == battle_id and player.battle is writer:
             message, payload = await receive(reader)
-            if self.battle_id != battle_id:
+            if self.battle_id != battle_id or player.battle is not writer:
                 return
             if message == 1:
                 await send(writer, message, payload)
