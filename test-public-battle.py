@@ -15,6 +15,15 @@ def frame(message, payload=b""):
     return struct.pack("<HH", 4 + len(payload), message) + payload
 
 
+def drain(sock):
+    sock.settimeout(0.1)
+    try:
+        while True:
+            sock.recvfrom(2048)
+    except socket.timeout:
+        pass
+
+
 def recv_msg(sock):
     head = sock.recv(4)
     while len(head) < 4:
@@ -96,8 +105,23 @@ def recv_until(sock, wanted, timeout=10):
 
 
 def main():
-    a, a_id = login("slot-1" + VERSION)
-    b, b_id = login("pc-test" + VERSION)
+    a = b = None
+    for attempt in range(15):
+        try:
+            a, a_id = login("slot-1" + VERSION)
+            b, b_id = login("pc-test" + VERSION)
+            break
+        except (ConnectionError, AssertionError, OSError) as login_error:
+            if a:
+                try: a.close()
+                except Exception: pass
+            if b:
+                try: b.close()
+                except Exception: pass
+            print("login retry", attempt, login_error)
+            time.sleep(4)
+    else:
+        raise SystemExit("login kept failing: " + str(login_error))
     print("login", a_id, b_id)
     ready(a)
     ready(b)
@@ -112,6 +136,22 @@ def main():
     b_battle.sendall(frame(38, struct.pack("<f", 1.0)))
     recv_until(a_battle, {39, 40}, timeout=5)
     recv_until(b_battle, {39, 40}, timeout=5)
+    vehicles = []
+    try:
+        while True:
+            msg, data = recv_msg(a_battle)
+            if msg == 72:
+                count = struct.unpack_from("<H", data, 0)[0]
+                offset = 2
+                for _ in range(count):
+                    vehicle_id, kind = struct.unpack_from("<II", data, offset)
+                    x, y, z = struct.unpack_from("<3f", data, offset + 8)
+                    vehicles.append((vehicle_id, x, z))
+                    offset += 8 + 32
+                break
+    except (AssertionError, socket.timeout):
+        pass
+    assert vehicles, "no vehicle spawn broadcast received"
 
     ua = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     ub = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -138,8 +178,88 @@ def main():
     assert msg == 34, (msg, data)
     recv_until(a2, {37}, timeout=5)
     print("reconnect 34/37 ok")
-    a2.close()
 
+    # --- regression: a reconnected player re-registers UDP and relays again.
+    a2.sendall(frame(38, struct.pack("<f", 1.0)))
+    time.sleep(0.3)
+    ua.sendto(struct.pack("<HHIHII", 18, 0, battle_id, WORLD_ID, a_id, a_id), (HOST, UDP))
+    time.sleep(0.3)
+    drain(ub)
+    status = struct.pack("<5f", 11.0, 15.0, 21.0, 0.0, 0.0)
+    ua.sendto(struct.pack("<HHIHII", 38, 82, battle_id, WORLD_ID, a_id, a_id) + status, (HOST, UDP))
+    ub.settimeout(5)
+    data, _ = ub.recvfrom(128)
+    size, message = struct.unpack_from("<HH", data)
+    _, sender = struct.unpack_from("<HI", data, 4)
+    fields = struct.unpack_from("<5f", data, 10) if size >= 30 else ()
+    assert message == 52 and sender == a_id and fields and fields[0] == 11.0,         ("post-reconnect relay got", size, message, sender, fields)
+    print("reconnect udp re-register ok")
+
+    # --- regression: mounted player status relay uses the vehicle position
+    # (the server used to crash on vehicle.y and freeze mounted players).
+    status = struct.pack("<5f", 11.0, 15.0, 21.0, 0.0, 0.0)
+    ua.sendto(struct.pack("<HHIHII", 38, 82, battle_id, WORLD_ID, a_id, a_id) + status, (HOST, UDP))
+    time.sleep(0.3)
+    mounted = False
+    for vehicle_id, vx, vz in vehicles:
+        # move the player next to the vehicle first (mount needs <= 9m)
+        drain(ub)
+        status = struct.pack("<5f", float(vx), 15.0, float(vz), 0.0, 0.0)
+        ua.sendto(struct.pack("<HHIHII", 38, 82, battle_id, WORLD_ID, a_id, a_id) + status, (HOST, UDP))
+        time.sleep(0.3)
+        for seat in range(2):
+            a2.sendall(frame(103, struct.pack("<IH", vehicle_id, seat)))
+            time.sleep(0.2)
+            data = b""
+            try:
+                while True:
+                    msg, data = recv_msg(a2)
+                    if msg == 103:
+                        mounted = True
+                        break
+            except (AssertionError, ConnectionError, socket.timeout):
+                continue
+            if mounted:
+                break
+        if mounted:
+            break
+    assert mounted, "mount failed (no vehicle within reach?)"
+    drain(ub)
+    status = struct.pack("<5f", 40.0, 15.0, 40.0, 90.0, 0.0)
+    ua.sendto(struct.pack("<HHIHII", 38, 82, battle_id, WORLD_ID, a_id, a_id) + status, (HOST, UDP))
+    ub.settimeout(5)
+    data, _ = ub.recvfrom(128)
+    size, message = struct.unpack_from("<HH", data)
+    _, sender = struct.unpack_from("<HI", data, 4)
+    x, y, z = struct.unpack_from("<3f", data, 10)
+    assert message == 52 and sender == a_id, (message, sender)
+    assert y == 15.0, "mounted status y is not the fixed ground height"
+    print("mounted status relay ok (vehicle position, y=15)")
+
+    # --- regression: disconnecting while mounted and scoped resets both, so
+    # the reconnected player is not position-pinned by stale server state.
+    a2.sendall(frame(206, b""))
+    time.sleep(0.2)
+    a2.close()
+    time.sleep(1)
+    a3 = socket.create_connection((battle_host, battle_port), timeout=5)
+    a3.sendall(frame(34, struct.pack("<IHI", battle_id, WORLD_ID, a_id)))
+    msg, data = recv_msg(a3)
+    assert msg == 34, (msg, data)
+    recv_until(a3, {37}, timeout=5)
+    ua.sendto(struct.pack("<HHIHII", 18, 0, battle_id, WORLD_ID, a_id, a_id), (HOST, UDP))
+    time.sleep(0.3)
+    drain(ub)
+    status = struct.pack("<5f", 12.0, 15.0, 22.0, 0.0, 0.0)
+    ua.sendto(struct.pack("<HHIHII", 38, 82, battle_id, WORLD_ID, a_id, a_id) + status, (HOST, UDP))
+    ub.settimeout(5)
+    data, _ = ub.recvfrom(128)
+    _, sender = struct.unpack_from("<HI", data, 4)
+    x, y, z = struct.unpack_from("<3f", data, 10)
+    assert (x, z) == (12.0, 22.0), ("stale scoped/mounted state pinned the reconnected player", x, z)
+    print("scoped/mounted state reset on disconnect ok")
+
+    a3.close()
     b_battle.close()
     a.close()
     b.close()
