@@ -35,6 +35,33 @@ Goal：完成 ECS 模式开发、稳定性验证、HTTPS 自动更新与可靠�
 3. 阶段四：玩法回归
 4. 阶段五：0.10.9（修复版）或 0.11.0（ECS Stable）
 
-## 阶段二进行中
+## 阶段二结果（HTTPS 自动更新）——基本完成
 
-（待填）
+### 服务端（ECS）
+- nginx 443 新增 `/mbg-update/` 静态目录（改动前备份 `/srv/example/mbg-4*`，`nginx -t` 通过后 reload，失败自动回滚）
+- 双入口：443 HTTPS（新启动器）+ 8080 HTTP（旧启动器兼容入口保留）
+- 管理 API 未被 443 暴露（/api/* 未代理）；目录列举 403
+- 证书：Let's Encrypt IP 证书（SAN=198.51.100.10），`qq-agent-cert-renew.timer` 每日两次自动续期 ✓
+- ECS server.py 已升级到 main（`d3b94a5`+，含 vehicle.y 修复、断线状态重置、测试钩子），systemd 重启验证 ✓，旧版备份 `server.py.bak-*`
+
+### 客户端（lan-launcher.cs / updater.cs）
+- UpdateUrl → `https://198.51.100.10/mbg-update/latest.json`；显式启用 TLS 1.2
+- `--apply-update` 无头模式：无 UI，stdout 输出 NO-UPDATE/UPDATE-OK/UPDATE-FAIL
+- `launcher-update.log` / `updater.log` 诊断日志
+- staging 优先安装目录（360 拦截 %TEMP% 写入时的回退）；更新器从 staging 目录运行
+- staging/替换文件剥离 Zone.Identifier（MotW）
+
+### 测试结果（headless-tests.ps1）
+- T1 HTTPS 拉取+签名验证+版本门槛：✓（NO-UPDATE 正确）
+- T3 篡改清单（改已签名字段）：✓ 拒绝（签名无效），客户端未动
+- T4 损坏 ZIP（sha 不匹配）：✓ 3 次重试后拒绝，客户端未动
+- T5 完整替换：**待用户配合**——本机 360 安全卫士拦截未签名更新器 exe 的启动（安全对话框），需要一次人工"运行"或加入信任列表。机制本身已到 apply ok（下载 89MB+校验+解压+MotW 剥离全通过）
+
+### 环境发现
+- 测试机同时运行 360 安全卫士 + 荣耀电脑管家 + Windows Defender
+- 360 对未签名程序写 %TEMP%/执行下载的 exe 有策略拦截（勒索防护类行为）——正式用户（国内）大概率遇到，已在启动器做缓解（staging 回退 + 明确错误提示）
+
+### 构建一致性
+- 0.10.9 构建输入：`_local-archive/public-client-v0109`（= v0108 底 + 最新补丁 Assembly-CSharp.dll）
+- manifest commit = `d3b94a5`+；dist/update/latest.json 双入口 md5 与本地一致
+
