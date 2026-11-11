@@ -976,17 +976,24 @@ class Match(asyncio.DatagramProtocol):
                 return
 
     async def drop_battle_test(self, player, writer, battle_id):
-        # Test hook (MBG_TEST_DROP_BATTLE=1): drop the host battle connection
-        # shortly after the battle starts to exercise reconnect recovery.
-        for _ in range(300):
-            if self.battle_id != battle_id or player.battle is not writer:
-                return
-            if self.started:
-                break
-            await asyncio.sleep(0.1)
-        await asyncio.sleep(3)
-        if player.battle is writer:
-            print("test hook: dropping player 1 battle connection", flush=True)
+        # Test hook (MBG_TEST_DROP_BATTLE): drop the host battle connection to
+        # exercise reconnect recovery. Mode 1 drops shortly after the battle
+        # starts; mode 2 drops during loading, before the client reports 38.
+        mode = os.environ.get("MBG_TEST_DROP_BATTLE")
+        if mode == "2":
+            # The 102 map loads in under a second; drop while the client is
+            # still between the join response and its 38.
+            await asyncio.sleep(0.2)
+        else:
+            for _ in range(300):
+                if self.battle_id != battle_id or player.battle is not writer:
+                    return
+                if self.started:
+                    break
+                await asyncio.sleep(0.1)
+            await asyncio.sleep(3)
+        if self.battle_id == battle_id and player.battle is writer:
+            print(f"test hook: dropping player {player.id} battle connection (mode {mode})", flush=True)
             writer.close()
 
     async def run_battle(self, player, reader, writer, battle_id, reconnect=False):
@@ -997,7 +1004,7 @@ class Match(asyncio.DatagramProtocol):
         if old_warning is not None:
             old_warning.cancel()
         player.udp_warning = asyncio.create_task(self.warn_if_udp_missing(player, writer, battle_id))
-        if os.environ.get("MBG_TEST_DROP_BATTLE") == "1" and player.id == 1 and not reconnect:
+        if os.environ.get("MBG_TEST_DROP_BATTLE") in ("1", "2") and player.id == 1 and not reconnect:
             asyncio.create_task(self.drop_battle_test(player, writer, battle_id))
         if reconnect and self.started:
             # A returning player needs a snapshot; other peers do not.
@@ -1836,7 +1843,7 @@ class Match(asyncio.DatagramProtocol):
             status = struct.unpack_from("<5f", data, 18)
             if player.vehicle is not None:
                 vehicle = player.vehicle
-                status = (vehicle.x, vehicle.y, vehicle.z, status[3], status[4])
+                status = (vehicle.x, 15.0, vehicle.z, status[3], status[4])
             if not all(map(math.isfinite, status)):
                 return
             if player.scoped:
