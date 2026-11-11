@@ -319,9 +319,9 @@ internal sealed class LanLauncher : Form
         {
             latest = await Task.Run(() => FetchUpdate());
         }
-        catch (InvalidDataException error)
+        catch (InvalidDataException invalid)
         {
-            MessageBox.Show("更新清单验证失败，已拒绝自动更新：\n" + error.Message,
+            MessageBox.Show("更新清单验证失败，已拒绝自动更新：\n" + invalid.Message,
                 "Mini Battlegrounds", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
@@ -1041,6 +1041,7 @@ internal sealed class LanLauncher : Form
         }
     }
 }
+
 
 
 

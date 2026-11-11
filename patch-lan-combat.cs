@@ -1321,9 +1321,20 @@ internal static class PatchCombat
         tickIl.Emit(OpCodes.Stsfld, retryAt);
         tickIl.Append(done);
 
-        var input = Method(module.GetType("CS.LocalController"), "UpdateInput", "System.Single");
-        var inputIl = input.Body.GetILProcessor();
-        inputIl.InsertBefore(input.Body.Instructions[0], inputIl.Create(OpCodes.Call, tick));
+        // Reconnect must be driven by a component that keeps updating after
+        // the battle input component is disabled. Main.Update is always alive.
+        var main = module.GetType("Main");
+        var mainUpdate = main == null ? null : main.Methods.FirstOrDefault(m => m.Name == "Update");
+        if (mainUpdate != null)
+        {
+            mainUpdate.Body.GetILProcessor().InsertBefore(
+                mainUpdate.Body.Instructions[0], mainUpdate.Body.GetILProcessor().Create(OpCodes.Call, tick));
+        }
+        else
+        {
+            var input = Method(module.GetType("CS.LocalController"), "UpdateInput", "System.Single");
+            input.Body.GetILProcessor().InsertBefore(input.Body.Instructions[0], input.Body.GetILProcessor().Create(OpCodes.Call, tick));
+        }
 
         // Bypass the original DisconnectAll path while recovery is active.
         // Insert at entry with an empty evaluation stack, not immediately
@@ -1337,6 +1348,11 @@ internal static class PatchCombat
         onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Brtrue, normalExit));
         onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Ldsfld, pending));
         onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Brtrue, alreadyQueued));
+        // Run the base TcpPeer cleanup even while recovery is pending. The
+        // high-level DisconnectAll/StageLogin path remains skipped, but the
+        // old socket must be reset or ConnectToBattleTcpServer can keep failing.
+        onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Ldarg_0));
+        onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Call, Method(peer, "OnDisconnect")));
         onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Ldc_I4_1));
         onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Stsfld, pending));
         onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Ldc_I4_0));
