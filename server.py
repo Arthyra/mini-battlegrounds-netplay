@@ -944,10 +944,24 @@ class Match(asyncio.DatagramProtocol):
                     player.reload_at = 0.0
                     print(f"battle disconnected; waiting for player {player.id}", flush=True)
 
+    async def warn_if_udp_missing(self, player, writer, battle_id):
+        text = "UDP 43135 未连接，移动同步可能失效；请检查防火墙/UDP 端口。"
+        data = text.encode("utf-16-le")
+        for _ in range(20):
+            await asyncio.sleep(1.0)
+            if self.battle_id != battle_id or player.udp is not None:
+                return
+            print(f"udp warning: player {player.id} not registered", flush=True)
+            try:
+                writer.write(frame(BATTLE_CHAT, struct.pack("<HIHH", WORLD_ID, player.id, 0, len(data)) + data))
+            except (ConnectionError, OSError):
+                return
+
     async def run_battle(self, player, reader, writer, battle_id):
         print(f"battle <- 34; player {player.id}", flush=True)
         writer.write(frame(34, struct.pack("<HIIHI", 0, BATTLE_UDP_PORT, player.id, 1, MAP_ID)))
         writer.write(frame(SCOREBOARD, self.score_text().encode("utf-8")))
+        asyncio.create_task(self.warn_if_udp_missing(player, writer, battle_id))
         if len(self.joined) == len(self.queued):
             await asyncio.sleep(0.5)
             if self.battle_id != battle_id:
