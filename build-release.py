@@ -2,6 +2,8 @@
 """Build the Windows player ZIP, write a manifest, and optionally publish it."""
 import importlib.util
 import argparse
+import base64
+import os
 import hashlib
 import json
 import subprocess
@@ -46,7 +48,13 @@ def main():
     parser.add_argument("--notes", type=Path, help="release notes Markdown file")
     parser.add_argument("--publish", action="store_true", help="create the GitHub release with gh")
     parser.add_argument("--repo", default=DEFAULT_REPO)
+    parser.add_argument("--signing-key", type=Path,
+                        default=Path(os.environ["MBG_UPDATE_SIGNING_KEY"]) if os.environ.get("MBG_UPDATE_SIGNING_KEY") else None,
+                        help="Pinned RSA private PEM for signing latest.json (never commit)")
+    parser.add_argument("--update-base-url", help="Public update directory URL, preferably HTTPS")
     args = parser.parse_args()
+    if args.signing_key is None or not args.signing_key.is_file():
+        parser.error("Set --signing-key or MBG_UPDATE_SIGNING_KEY to the matching RSA private PEM.")
 
     args.output.mkdir(parents=True, exist_ok=True)
     archive = args.output / "Mini-Battlegrounds-LAN-Windows.zip"
@@ -74,13 +82,22 @@ def main():
     if update_archive.exists():
         update_archive.unlink()
     update_archive.write_bytes(archive.read_bytes())
+    base_url = (args.update_base_url or f"http://{args.host}:8080/update").rstrip("/")
     latest = {
         "version": args.version,
         "tag": manifest["tag"],
-        "url": f"http://{args.host}:8080/update/{archive.name}",
+        "url": f"{base_url}/{archive.name}",
         "bytes": manifest["bytes"],
         "sha256": manifest["sha256"],
     }
+    # Keep this exact canonical form in sync with lan-launcher.cs.
+    canonical = ("MBG-LAN-UPDATE-1\n" + latest["version"] + "\n"
+                 + latest["url"] + "\n" + latest["sha256"].lower() + "\n").encode("utf-8")
+    signature = subprocess.run(
+        ["openssl", "dgst", "-sha256", "-sign", str(args.signing_key)],
+        input=canonical, stdout=subprocess.PIPE, check=True,
+    ).stdout
+    latest["signature"] = base64.b64encode(signature).decode("ascii")
     (update_dir / "latest.json").write_text(json.dumps(latest, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(manifest, indent=2))
     print(json.dumps(latest, indent=2))

@@ -267,6 +267,7 @@ internal sealed class LanLauncher : Form
         public string Version;
         public string Url;
         public string Sha256;
+        public string Signature;
     }
 
     private const string UpdateUrl = "http://198.51.100.10:8080/update/latest.json";
@@ -318,6 +319,12 @@ internal sealed class LanLauncher : Form
         {
             latest = await Task.Run(() => FetchUpdate());
         }
+        catch (InvalidDataException error)
+        {
+            MessageBox.Show("更新清单验证失败，已拒绝自动更新：\n" + error.Message,
+                "Mini Battlegrounds", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
         catch
         {
             return;
@@ -368,6 +375,41 @@ internal sealed class LanLauncher : Form
         Close();
     }
 
+    // Pinned RSA public key. The corresponding private key MUST remain offline.
+    private const string UpdatePublicModulus = "vswNeqadE/dVs5VKr7oCK/ihRkwymqGtPVbVpT6WqkzqsVroH+ElJep0PjwYIoCFul3LJQOQTIQVCF6vMsk5y/azICGTjHPQUlBXXqypPI6GhsuyS303A+IqA5E3HOExd7iO5vTJOnLeDRVIVJmOg3QBKwMc8P1PuCaw5FeLB8x++LTPTsKr8GG33E6Cy6wNWOq7os/GBEwfYcvY6hmcC8gRo2LpetDBALBPI2aS0ewz1LKAyHVTAaQfF6MbwFggjzjyWP08RHEIGkNoAPluezJLuXy9W0N2Z2r3+xH/iwzjsyFdtsxjN0BcFTkLlI57h/ur+EIEgOWZANW6Tzjwkw==";
+
+    private static bool VerifyUpdateManifest(UpdateInfo info)
+    {
+        if (string.IsNullOrEmpty(info.Version) || string.IsNullOrEmpty(info.Url) ||
+            string.IsNullOrEmpty(info.Sha256) || info.Sha256.Length != 64 ||
+            string.IsNullOrEmpty(info.Signature))
+            return false;
+        foreach (char ch in info.Sha256)
+            if (!Uri.IsHexDigit(ch))
+                return false;
+        Uri uri;
+        if (!Uri.TryCreate(info.Url, UriKind.Absolute, out uri) ||
+            (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+            return false;
+        byte[] payload = Encoding.UTF8.GetBytes("MBG-LAN-UPDATE-1\n" +
+            info.Version + "\n" + info.Url + "\n" + info.Sha256.ToLowerInvariant() + "\n");
+        try
+        {
+            using (var rsa = new RSACryptoServiceProvider())
+            {
+                rsa.PersistKeyInCsp = false;
+                rsa.ImportParameters(new RSAParameters {
+                    Modulus = Convert.FromBase64String(UpdatePublicModulus),
+                    Exponent = Convert.FromBase64String("AQAB")
+                });
+                return rsa.VerifyData(payload, CryptoConfig.MapNameToOID("SHA256"),
+                    Convert.FromBase64String(info.Signature));
+            }
+        }
+        catch (CryptographicException) { return false; }
+        catch (FormatException) { return false; }
+    }
+
     private static UpdateInfo FetchUpdate()
     {
         using (var client = new WebClient())
@@ -375,12 +417,16 @@ internal sealed class LanLauncher : Form
             client.Proxy = null;
             client.Encoding = Encoding.UTF8;
             var json = client.DownloadString(UpdateUrl);
-            return new UpdateInfo
+            var latest = new UpdateInfo
             {
                 Version = JsonValue(json, "version"),
                 Url = JsonValue(json, "url"),
                 Sha256 = JsonValue(json, "sha256"),
+                Signature = JsonValue(json, "signature"),
             };
+            if (!VerifyUpdateManifest(latest))
+                throw new InvalidDataException("更新清单签名无效，或下载地址/校验值被修改。");
+            return latest;
         }
     }
 
@@ -425,14 +471,11 @@ internal sealed class LanLauncher : Form
                 DownloadUpdate(latest.Url, archive, progress);
                 progress.Report(new UpdateProgress { Percent = 72, Text = "校验更新包…" });
                 var valid = true;
-                if (!string.IsNullOrEmpty(latest.Sha256))
+                using (var sha = SHA256.Create())
+                using (var stream = File.OpenRead(archive))
                 {
-                    using (var sha = SHA256.Create())
-                    using (var stream = File.OpenRead(archive))
-                    {
-                        var actual = BitConverter.ToString(sha.ComputeHash(stream)).Replace("-", "").ToLowerInvariant();
-                        valid = actual == latest.Sha256.ToLowerInvariant();
-                    }
+                    var actual = BitConverter.ToString(sha.ComputeHash(stream)).Replace("-", "").ToLowerInvariant();
+                    valid = actual == latest.Sha256.ToLowerInvariant();
                 }
                 if (valid)
                     break;
