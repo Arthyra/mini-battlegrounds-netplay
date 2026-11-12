@@ -744,7 +744,7 @@ internal sealed class LanLauncher : Form
             var version = FileVersionInfo.GetVersionInfo(Application.ExecutablePath).FileVersion;
             Version parsed;
             if (Version.TryParse(version, out parsed))
-                return parsed.ToString(3);
+                return parsed.ToString();
             return string.IsNullOrEmpty(version) ? "0.0" : version;
         }
         catch
