@@ -1553,7 +1553,9 @@ internal static class PatchCombat
             {
                 var m = basePeer.Methods.FirstOrDefault(x => x.Name == name && x.Parameters.Count == 0);
                 if (m == null) continue;
-                var close = m.Body.Instructions.FirstOrDefault(i =>
+                var catchHandler = m.Body.ExceptionHandlers.FirstOrDefault(h => h.HandlerType == ExceptionHandlerType.Catch);
+                if (catchHandler == null) continue;
+                var close = m.Body.Instructions.SkipWhile(i => i != catchHandler.HandlerStart).FirstOrDefault(i =>
                     (i.OpCode == OpCodes.Call || i.OpCode == OpCodes.Callvirt) &&
                     i.Operand != null && ((MethodReference)i.Operand).Name == "Close");
                 if (close == null) continue;
