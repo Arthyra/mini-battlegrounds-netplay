@@ -14,6 +14,11 @@
 
 ## Evidence
 
+- `7fb5e48` adds the isolated-instance/physical-PC kit. Candidate Unity runtime initially exposed unsupported `Monitor.Enter(object, ref bool)` from framework-default compilation. Fixed to legacy Monitor.Enter/Exit and compiled against the bundled runtime using `/noconfig /nostdlib`; new candidate enters the original lobby and map 102 in two actual local Unity processes, with no exception stacks in their new logs. This is LOCAL SMOKE, not physical/ECS acceptance.
+- Measured local normal synchronous battle Connect on Unity thread 1: 6.817 ms and 6.809 ms in the two clients. Fault-path timing remains pending.
+- External 432xx protocol probe closes/times out while ECS-loopback protocol probe returns message 20. Instance INPUT policy ACCEPT. New-port external reachability remains an open preparation gate; do not claim ECS candidate play PASS.
+- Found existing receive trace recorded local 2 (frame size), not local 3 (message ID). Corrected the trace operand so 2-second ping echoes can be counted. The prior local idle observation has no reconnects but its ping trace cannot establish cadence; repeat is required after rebuild.
+
 - Isolated ECS unit created under `/srv/example/mbg-3`, with separate profiles, admin disabled and 432xx ports. Its TCP endpoints are reachable. Production unit remains active on 431xx. No production disconnect, firewall change or restart performed.
 - Found correct unpatched input at `C:/Users/Example/.deepseek/mbg-lan-test/Assembly-CSharp-input.dll`. The handoff's workcopy DLL fails the patcher's collision-branch guard; it was not used in the candidate.
 - Added opt-in main-frame/Connect timing, UTC+thread IDs, bounded two-file network diagnostics, and a compile-gated acceptance login port override. Release builds must compile without `ECS_ACCEPTANCE`.

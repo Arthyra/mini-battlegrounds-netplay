@@ -40,7 +40,8 @@ public static class EcsDiagnostics
         if (string.IsNullOrEmpty(log)) return;
         try
         {
-            lock (gate)
+            Monitor.Enter(gate);
+            try
             {
                 if (File.Exists(log) && new FileInfo(log).Length > 1024 * 1024)
                 {
@@ -50,6 +51,7 @@ public static class EcsDiagnostics
                 File.AppendAllText(log, DateTime.UtcNow.ToString("o") + " thread=" +
                     Thread.CurrentThread.ManagedThreadId + " " + value + Environment.NewLine);
             }
+            finally { Monitor.Exit(gate); }
         }
         catch (IOException) { }
         catch (UnauthorizedAccessException) { }

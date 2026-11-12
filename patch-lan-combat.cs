@@ -1642,11 +1642,11 @@ internal static class PatchCombat
             ri.InsertBefore(rf, ri.Create(OpCodes.Stsfld, tcpActive));
             // Trace every received battle packet with its message id so the
             // trace shows whether ping echoes and snapshot bursts arrive.
-            var msgIdStore = recvHeartbeat.Body.Instructions.FirstOrDefault(i => i.OpCode == OpCodes.Stloc_2);
+            var msgIdStore = recvHeartbeat.Body.Instructions.FirstOrDefault(i => i.OpCode == OpCodes.Stloc_3);
             if (msgIdStore != null)
             {
                 ri.InsertAfter(msgIdStore, ri.Create(OpCodes.Ldstr, "rx"));
-                ri.InsertAfter(msgIdStore.Next, ri.Create(OpCodes.Ldloc_2));
+                ri.InsertAfter(msgIdStore.Next, ri.Create(OpCodes.Ldloc_3));
                 ri.InsertAfter(msgIdStore.Next.Next, ri.Create(OpCodes.Call, trace));
             }
         }
