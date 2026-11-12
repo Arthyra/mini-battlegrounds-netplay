@@ -952,11 +952,12 @@ class Match(asyncio.DatagramProtocol):
             raise
         finally:
             print(f"battle conn exit player={player.id} battle={battle_id} writer={id(writer)} peer={peer} is_current={player.battle is writer} started={self.started} ready={player.ready}", flush=True)
-            warning = getattr(player, "udp_warning", None)
-            if warning is not None:
-                warning.cancel()
-                player.udp_warning = None
             if player.battle is writer:
+                # A replaced writer must not cancel its successor's task.
+                warning = getattr(player, "udp_warning", None)
+                if warning is not None:
+                    warning.cancel()
+                    player.udp_warning = None
                 player.battle = player.udp = None
                 player.disconnected_at = time.monotonic()
                 player.firing = False

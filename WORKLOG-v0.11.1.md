@@ -14,4 +14,7 @@
 
 ## Evidence
 
+- `4519bff` captures the baseline and deterministic failing regression. `python test-connection-lifecycle.py` reproduced stale A cancelling B's warning (1 FAIL, 1 PASS), saved in `build/v0.11.1/lifecycle-before.txt`.
+- P2 server task-ownership fix scopes warning cancellation to the current writer. Re-run result is recorded with the fix commit. Production is unchanged.
+
 Local scratch/build/test results will be kept under ignored `build/v0.11.1/`. Each completed stage records commands, results and commit here. Secrets and private signing keys are excluded.
