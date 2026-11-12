@@ -47,3 +47,4 @@
 !/tests/test-room-and-explosion.py
 !/tests/test-gameplay-timing.py
 !/tests/run-all.py
+!/tests/test-discovery-endpoints.cs
