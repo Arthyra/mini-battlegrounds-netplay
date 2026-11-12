@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -64,7 +64,6 @@ internal sealed class LanLauncher : Form
         catch
         {
         }
-        StripZoneMarkers();
         EnsureDesktopShortcut();
         if (args.Length == 2 && args[0] == "--host")
         {
@@ -105,31 +104,6 @@ internal sealed class LanLauncher : Form
             Environment.Exit(exitCode);
         }
         Application.Run(new LanLauncher());
-    }
-
-    private static void StripZoneMarkers()
-    {
-        // The release zip carries Mark-of-the-Web; Windows then shows the
-        // "unknown publisher" prompt on every launch of every exe. Stripping
-        // the zone marker once keeps later launches quiet (a real code
-        // signing certificate is the only way to remove the first prompt).
-        try
-        {
-            var root = AppDomain.CurrentDomain.BaseDirectory;
-            var targets = new List<string>(Directory.GetFiles(root, "*.exe"));
-            var client = Path.Combine(root, "client");
-            if (Directory.Exists(client))
-            {
-                targets.AddRange(Directory.GetFiles(client, "*.exe", SearchOption.AllDirectories));
-            }
-            foreach (var file in targets)
-            {
-                try { File.Delete(file + ":Zone.Identifier"); } catch { }
-            }
-        }
-        catch
-        {
-        }
     }
 
     private static void EnsureDesktopShortcut()
@@ -336,14 +310,12 @@ internal sealed class LanLauncher : Form
 
     // Tried in order. The RSA endpoint (ISRG Root X1) works on older .NET
     // and Windows builds where the ECDSA/ISRG Root YE chain is untrusted;
-    // the legacy HTTP entry stays as the final compatibility fallback - the
-    // RSA manifest signature is enforced on every entry, so authenticity
-    // never depends on the transport.
+    // New launchers never downgrade to HTTP. Legacy servers can retain the
+    // HTTP entry for old launchers while serving HTTPS URLs in signed manifests.
     private static readonly string[] UpdateUrls =
     {
         "https://198.51.100.10:8445/mbg-update/latest.json",
         "https://198.51.100.10/mbg-update/latest.json",
-        "http://198.51.100.10:8080/update/latest.json",
     };
     private static bool applyUpdateSilently;
 
@@ -484,7 +456,7 @@ internal sealed class LanLauncher : Form
                 return false;
         Uri uri;
         if (!Uri.TryCreate(info.Url, UriKind.Absolute, out uri) ||
-            (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+            uri.Scheme != Uri.UriSchemeHttps)
             return false;
         byte[] payload = Encoding.UTF8.GetBytes("MBG-LAN-UPDATE-1\n" +
             info.Version + "\n" + info.Url + "\n" + info.Sha256.ToLowerInvariant() + "\n");
@@ -527,13 +499,37 @@ internal sealed class LanLauncher : Form
         throw lastError ?? new InvalidOperationException("没有可用的更新服务器。");
     }
 
+    private static HttpWebRequest UpdateRequest(string url)
+    {
+        Uri uri;
+        if (!Uri.TryCreate(url, UriKind.Absolute, out uri) || uri.Scheme != Uri.UriSchemeHttps)
+            throw new InvalidDataException("更新必须使用 HTTPS。");
+        var request = (HttpWebRequest)WebRequest.Create(uri);
+        request.Proxy = null;
+        request.AllowAutoRedirect = false;
+        request.Timeout = 30000;
+        request.ReadWriteTimeout = 30000;
+        request.UserAgent = "MiniBattlegroundsUpdater/1.1";
+        return request;
+    }
+
+    private static HttpWebResponse UpdateResponse(string url)
+    {
+        var response = (HttpWebResponse)UpdateRequest(url).GetResponse();
+        if (response.StatusCode != HttpStatusCode.OK)
+        {
+            response.Close();
+            throw new WebException("更新服务器未返回 HTTP 200，拒绝重定向或降级。");
+        }
+        return response;
+    }
+
     private static UpdateInfo FetchUpdateFrom(string url)
     {
-        using (var client = new WebClient())
+        using (var response = UpdateResponse(url))
+        using (var input = new StreamReader(response.GetResponseStream(), Encoding.UTF8))
         {
-            client.Proxy = null;
-            client.Encoding = Encoding.UTF8;
-            var json = client.DownloadString(url);
+            var json = input.ReadToEnd();
             var latest = new UpdateInfo
             {
                 Version = JsonValue(json, "version"),
@@ -549,13 +545,7 @@ internal sealed class LanLauncher : Form
 
     private static void DownloadUpdate(string url, string path, IProgress<UpdateProgress> progress)
     {
-        var request = (HttpWebRequest)WebRequest.Create(url);
-        request.Proxy = null;
-        request.Timeout = 30000;
-        request.ReadWriteTimeout = 30000;
-        request.UserAgent = "MiniBattlegroundsUpdater/1.0";
-        request.Expect = null;
-        using (var response = (HttpWebResponse)request.GetResponse())
+        using (var response = UpdateResponse(url))
         using (var input = response.GetResponseStream())
         using (var output = File.Create(path))
         {
@@ -601,7 +591,24 @@ internal sealed class LanLauncher : Form
             progress.Report(new UpdateProgress { Percent = 2, Text = "连接更新服务器…" });
             for (var attempt = 1; ; attempt++)
             {
-                DownloadUpdate(latest.Url, archive, progress);
+                try
+                {
+                    DownloadUpdate(latest.Url, archive, progress);
+                }
+                catch (WebException error)
+                {
+                    LogUpdate("download interrupted (attempt " + attempt + "): " + error.Message);
+                    if (attempt >= 3) throw;
+                    System.Threading.Thread.Sleep(1000);
+                    continue;
+                }
+                catch (IOException error)
+                {
+                    LogUpdate("download incomplete (attempt " + attempt + "): " + error.Message);
+                    if (attempt >= 3) throw;
+                    System.Threading.Thread.Sleep(1000);
+                    continue;
+                }
                 progress.Report(new UpdateProgress { Percent = 72, Text = "校验更新包…" });
                 var valid = true;
                 using (var sha = SHA256.Create())
@@ -648,12 +655,6 @@ internal sealed class LanLauncher : Form
             if (!File.Exists(Path.Combine(staging, "Updater.exe")))
                 throw new InvalidDataException("更新包缺少 Updater.exe。");
             progress.Report(new UpdateProgress { Percent = 95, Text = "准备独立更新器…" });
-            // Downloaded files carry Mark-of-the-Web; every later launch
-            // would trigger a security warning. Strip it while staging.
-            foreach (var file in Directory.EnumerateFiles(staging, "*", SearchOption.AllDirectories))
-            {
-                try { File.Delete(file + ":Zone.Identifier"); } catch { }
-            }
             return staging;
         }
         catch

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
@@ -153,7 +153,6 @@ internal sealed class Updater : Form
                         if (File.Exists(destination))
                             try { File.SetAttributes(destination, FileAttributes.Normal); } catch { }
                         File.Copy(files[i], destination, true);
-                        try { File.Delete(destination + ":Zone.Identifier"); } catch { }
                         break;
                     }
                     catch (UnauthorizedAccessException copyError)

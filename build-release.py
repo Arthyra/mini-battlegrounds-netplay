@@ -82,7 +82,9 @@ def main():
     if update_archive.exists():
         update_archive.unlink()
     update_archive.write_bytes(archive.read_bytes())
-    base_url = (args.update_base_url or f"http://{args.host}:8080/update").rstrip("/")
+    base_url = (args.update_base_url or f"https://{args.host}/mbg-update").rstrip("/")
+    if not base_url.lower().startswith("https://"):
+        parser.error("New update download URLs must use HTTPS.")
     latest = {
         "version": args.version,
         "tag": manifest["tag"],

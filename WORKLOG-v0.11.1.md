@@ -16,5 +16,10 @@
 
 - `4519bff` captures the baseline and deterministic failing regression. `python test-connection-lifecycle.py` reproduced stale A cancelling B's warning (1 FAIL, 1 PASS), saved in `build/v0.11.1/lifecycle-before.txt`.
 - P2 server task-ownership fix scopes warning cancellation to the current writer. Re-run result is recorded with the fix commit. Production is unchanged.
+- `14a89b5` fixes task ownership; `build/v0.11.1/lifecycle-after.txt` records 2 PASS.
+- HTTPS actual deployment: both 443 and 8445 return signed manifests with valid system-trusted TLS from Windows/.NET. Both nginx listeners use the RSA `mbg-update-rsa` certificate, expiring 2026-11-18. Renewal timer enabled but has no execution history yet; renewal success NOT VERIFIED.
+- P2 update transport fix removes HTTP fallback, rejects HTTP package URLs and automatic redirects, retaining pinned RSA-SHA256 signature validation. `test-update-policy.cs` runs against the compiled launcher and real ECS manifests: 7 PASS in `build/v0.11.1/https-policy.txt` (including forged signature and HTTP refusal).
+- Removed startup-wide and update-stage Zone.Identifier deletion and destination ADS stripping. No Windows security settings changed. Newly compiled launcher/updater compile successfully; full installer regression still pending.
+- Download network/IO interruption now gets bounded retries using a fresh download; installation starts only after SHA256 validation.
 
 Local scratch/build/test results will be kept under ignored `build/v0.11.1/`. Each completed stage records commands, results and commit here. Secrets and private signing keys are excluded.
