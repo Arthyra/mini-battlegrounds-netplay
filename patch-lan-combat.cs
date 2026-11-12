@@ -1173,6 +1173,99 @@ internal static class PatchCombat
             skipRefresh);
     }
 
+    private static void InstallSceneAssetRetention(ModuleDefinition module)
+    {
+        // StageBattle.Unload calls UnloadUntouchedAssetBundles(true); the
+        // boolean reaches AssetBundle.Unload(unloadAllLoadedObjects), so
+        // every asset already extracted from an untouched bundle (scene
+        // lightmaps, shared materials) is destroyed when a battle stage is
+        // left. A battle re-entry then renders with missing lightmaps - the
+        // intermittent bright-grid / untextured-ground reports. Pass false:
+        // drop the bundle handles, keep the extracted assets alive.
+        var battle = module.GetType("CS.StageBattle");
+        var unload = battle.Methods.Single(m => m.Name == "Unload");
+        var call = unload.Body.Instructions.Single(i =>
+            i.OpCode == OpCodes.Callvirt && i.Operand is MethodReference &&
+            ((MethodReference)i.Operand).Name == "UnloadUntouchedAssetBundles");
+        var constant = call.Previous;
+        if (constant.OpCode != OpCodes.Ldc_I4_1)
+            throw new InvalidOperationException("Unexpected UnloadUntouchedAssetBundles argument pattern.");
+        constant.OpCode = OpCodes.Ldc_I4_0;
+    }
+    private static void InstallBlackholeDetection(ModuleDefinition module)
+    {
+        // TcpPeer.StartReceive polls indefinitely, so a silently-blackholed
+        // link (no FIN/RST, both directions dropped) never wakes the receive
+        // thread: the client sat on a dead socket forever - the physical PC2
+        // "lost traffic and stalled at login" stall. All receive dispatch
+        // happens on the Unity main thread (DispatchRecvBuffer from
+        // TcpPeer.Update), so track the last receive time there and let the
+        // same Update declare a disconnect once a ping-enabled proxy (world/
+        // battle, 2s pings) has been silent for 8s. No branches cross the
+        // receive-thread try region.
+        var peer = module.GetType("CS.TcpPeer");
+        var proxyType = module.GetType("CS.TcpServerProxy");
+        var engine = module.AssemblyResolver.Resolve(
+            module.AssemblyReferences.Single(a => a.Name == "UnityEngine")).MainModule;
+        var realtime = module.ImportReference(
+            Method(engine.GetType("UnityEngine.Time"), "get_realtimeSinceStartup"));
+        var lastRecv = new FieldDefinition("mLanLastRecv",
+            FieldAttributes.Private, module.TypeSystem.Single);
+        peer.Fields.Add(lastRecv);
+
+        // DispatchRecvBuffer: stamp the receive time right before every
+        // OnReceive dispatch.
+        var dispatch = peer.Methods.Single(m => m.Name == "DispatchRecvBuffer");
+        var onReceiveCall = dispatch.Body.Instructions.Single(i =>
+            i.OpCode == OpCodes.Callvirt && i.Operand is MethodReference &&
+            ((MethodReference)i.Operand).Name == "OnReceive");
+        var dil = dispatch.Body.GetILProcessor();
+        var stampAnchor = onReceiveCall.Previous.Previous;  // the ldarg.0 pushing `this` for the OnReceive call
+        dil.InsertBefore(stampAnchor, dil.Create(OpCodes.Ldarg_0));
+        dil.InsertBefore(stampAnchor, dil.Create(OpCodes.Call, realtime));
+        dil.InsertBefore(stampAnchor, dil.Create(OpCodes.Stfld, lastRecv));
+
+        // TcpPeer.Update: before OnUpdate, a ping-enabled proxy silent for
+        // over 8s declares a disconnect (the same thread, same locking).
+        var update = peer.Methods.Single(m => m.Name == "Update" && m.Parameters.Count == 1);
+        var onUpdateCall = update.Body.Instructions.Single(i =>
+            i.OpCode == OpCodes.Callvirt && i.Operand is MethodReference &&
+            ((MethodReference)i.Operand).Name == "OnUpdate");
+        var uil = update.Body.GetILProcessor();
+        var probe = new VariableDefinition(proxyType);
+        var elapsed = new VariableDefinition(module.TypeSystem.Single);
+        update.Body.Variables.Add(probe);
+        update.Body.Variables.Add(elapsed);
+        var skip = uil.Create(OpCodes.Nop);
+        var checks = new[]
+        {
+            uil.Create(OpCodes.Ldarg_0),
+            uil.Create(OpCodes.Isinst, proxyType),
+            uil.Create(OpCodes.Stloc, probe),
+            uil.Create(OpCodes.Ldloc, probe),
+            uil.Create(OpCodes.Brfalse, skip),
+            uil.Create(OpCodes.Ldloc, probe),
+            uil.Create(OpCodes.Callvirt, Method(proxyType, "IsPingEnabled")),
+            uil.Create(OpCodes.Brfalse, skip),
+            uil.Create(OpCodes.Ldarg_0),
+            uil.Create(OpCodes.Ldfld, lastRecv),
+            uil.Create(OpCodes.Ldc_R4, 0f),
+            uil.Create(OpCodes.Ble, skip),
+            uil.Create(OpCodes.Call, realtime),
+            uil.Create(OpCodes.Ldarg_0),
+            uil.Create(OpCodes.Ldfld, lastRecv),
+            uil.Create(OpCodes.Sub),
+            uil.Create(OpCodes.Stloc, elapsed),
+            uil.Create(OpCodes.Ldloc, elapsed),
+            uil.Create(OpCodes.Ldc_R4, 8f),
+            uil.Create(OpCodes.Ble, skip),
+            uil.Create(OpCodes.Ldarg_0),
+            uil.Create(OpCodes.Callvirt, Method(peer, "OnDisconnect")),
+        };
+        foreach (var instruction in checks)
+            uil.InsertBefore(onUpdateCall, instruction);
+        uil.InsertBefore(onUpdateCall, skip);
+    }
     private static void InstallUnitLeave(ModuleDefinition module)
     {
         var battle = module.GetType("CS.Battle");
@@ -2589,6 +2682,8 @@ internal static class PatchCombat
                 Console.WriteLine("step profile"); InstallProfileName(module);
                 Console.WriteLine("step nickname"); InstallNickname(module);
         InstallUnitLeave(module);
+        Console.WriteLine("step sceneassets"); InstallSceneAssetRetention(module);
+        Console.WriteLine("step blackhole"); InstallBlackholeDetection(module);
         InstallReconnect(module, roomUi);
                 Console.WriteLine("step scoreboard"); InstallScoreboard(module);
                 Console.WriteLine("step tips"); InstallHideTips(module);
