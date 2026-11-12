@@ -30,5 +30,6 @@
 !/Start-EcsAcceptance.ps1
 !/Collect-EcsEvidence.ps1
 !/ECS-ACCEPTANCE-v0.11.1.md
+!/build-acceptance.py
 
 
