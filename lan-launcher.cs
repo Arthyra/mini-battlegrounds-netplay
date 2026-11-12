@@ -64,6 +64,7 @@ internal sealed class LanLauncher : Form
         catch
         {
         }
+        StripZoneMarkers();
         EnsureDesktopShortcut();
         if (args.Length == 2 && args[0] == "--host")
         {
@@ -104,6 +105,31 @@ internal sealed class LanLauncher : Form
             Environment.Exit(exitCode);
         }
         Application.Run(new LanLauncher());
+    }
+
+    private static void StripZoneMarkers()
+    {
+        // The release zip carries Mark-of-the-Web; Windows then shows the
+        // "unknown publisher" prompt on every launch of every exe. Stripping
+        // the zone marker once keeps later launches quiet (a real code
+        // signing certificate is the only way to remove the first prompt).
+        try
+        {
+            var root = AppDomain.CurrentDomain.BaseDirectory;
+            var targets = new List<string>(Directory.GetFiles(root, "*.exe"));
+            var client = Path.Combine(root, "client");
+            if (Directory.Exists(client))
+            {
+                targets.AddRange(Directory.GetFiles(client, "*.exe", SearchOption.AllDirectories));
+            }
+            foreach (var file in targets)
+            {
+                try { File.Delete(file + ":Zone.Identifier"); } catch { }
+            }
+        }
+        catch
+        {
+        }
     }
 
     private static void EnsureDesktopShortcut()
