@@ -2460,6 +2460,18 @@ internal static class PatchCombat
 
     private static void InstallItems(ModuleDefinition module, TypeDefinition battle, TypeDefinition unit)
     {
+        // Match the server's shorter preparation/toss windows for every throwable.
+        // Keep parsing all columns so later data fields retain their original offsets.
+        var throwableLoad = Method(module.GetType("CS.ThrowableDataManager"), "Load", "System.String");
+        var timingIl = throwableLoad.Body.GetILProcessor();
+        foreach (var timing in new[] { "mThrowPrepareTime", "mThrowTossTime" })
+        {
+            var store = throwableLoad.Body.Instructions.Single(i => i.OpCode == OpCodes.Stfld &&
+                ((FieldReference)i.Operand).Name == timing);
+            Before(timingIl, store, timingIl.Create(OpCodes.Pop),
+                timingIl.Create(OpCodes.Ldc_R4, timing == "mThrowPrepareTime" ? .10f : .15f));
+        }
+
         var local = module.GetType("CS.LocalController");
         var input = Method(local, "UpdateInput", "System.Single");
         foreach (var key in new[] { 52, 53, 54 })

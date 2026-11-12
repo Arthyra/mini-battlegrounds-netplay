@@ -128,6 +128,8 @@ MED_SLOT = 4
 FIRST_AID_KIND = 1
 FIRST_AID_CAST_TIME = 4.0
 FIRST_AID_HEAL = 400.0
+THROW_PREPARE_TIME = 0.10
+THROW_TOSS_TIME = 0.15
 MACHETE_KIND = 2
 MACHETE_COOLDOWN = 1.2
 MACHETE_RANGE = 5.0
@@ -150,9 +152,9 @@ VEHICLE_SPECS = {
 }
 # Hatchback is the quickest, pickup is the slowest, van sits between.
 VEHICLE_DRIVE_SPEEDS = {
-    1: (16.0, 7.5),
-    2: (9.0, 4.0),
-    3: (11.0, 5.0),
+    1: (20.8, 9.75),
+    2: (11.7, 5.2),
+    3: (14.3, 6.5),
 }
 VEHICLE_BLAST_MESSAGES = {
     BULLET_EXPLOSION_HIT_UNIT: BULLET_EXPLOSION_HIT_VEHICLE,
@@ -373,7 +375,7 @@ class Vehicle:
         dx, dz = self.heading()
         x = max(-69.0, min(79.0, self.x + dx * self.speed * TICK))
         z = max(-11.4, min(56.6, self.z + dz * self.speed * TICK))
-        # At 20 Hz the car moves at most .5 m. Check the midpoint as well
+        # At 20 Hz the fastest car moves at most 1.04 m. Check the midpoint as well
         # to catch a grazing corner while the body moves along a wall.
         if (self.blocked((self.x + x) / 2, (self.z + z) / 2, self.yaw, obstacles, other_vehicles)
                 or self.blocked(x, z, self.yaw, obstacles, other_vehicles)):
@@ -1135,8 +1137,8 @@ class Match(asyncio.DatagramProtocol):
                         player.throw_started = now
                         self.broadcast(OPERATE, struct.pack("<I?", player.id, False))
                     elif message == STOP_OPERATE and player.throw_started:
-                        player.throw_release_at = max(now, player.throw_started + .35)
-                        player.throw_at = player.throw_release_at + .55
+                        player.throw_release_at = max(now, player.throw_started + THROW_PREPARE_TIME)
+                        player.throw_at = player.throw_release_at + THROW_TOSS_TIME
                         player.throw_started = 0.0
                 elif player.slot == MED_SLOT:
                     if message == OPERATE:
