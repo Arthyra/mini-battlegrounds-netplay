@@ -64,3 +64,7 @@
 /docs/releases/v0.11.2/*
 !/docs/releases/v0.11.2/release-notes.md
 !/docs/releases/v0.11.2/worklog.md
+!/docs/releases/v0.11.3/
+/docs/releases/v0.11.3/*
+!/docs/releases/v0.11.3/release-notes.md
+!/docs/releases/v0.11.3/worklog.md

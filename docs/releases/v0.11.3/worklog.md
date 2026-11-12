@@ -1,0 +1,11 @@
+# v0.11.3 lobby UI fixes
+
+2026-11-12. User reported rename control remaining in battle and non-owner ready control labelled as start.
+
+- Initial worktree clean, main e0ccbd2. Read current AGENTS.md. Preserve unrelated existing local server and the user's running installed client.
+- Root cause: rename is parented to the shared Canvas, but LanRoomUI belongs to the hall ready button. Hall deactivation can stop Update before it hides the separately parented rename object.
+- Add OnDisable to close rename state/hide its button and OnDestroy to remove the owned rename object. Keep the existing layout and rename behavior. Ready label now uses only ready/not-ready state, not ownership; the owner's independent start button remains unchanged.
+- Compile against the bundled Unity runtime without ECS_ACCEPTANCE; reuse unchanged production Assembly-CSharp.dll. Actual tested LanRoomUI.dll is the release input.
+- Local UI smoke: two actual Unity processes, isolated loopback service on a different local address to preserve an already running local server. Test wrapper shortens round length to60s only; production server code unchanged. Verified non-owner Ready/Cancel Ready, owner's separate Start, map102 entry without rename button, F2 not opening rename in battle, round end and lobby rename/F2 restored without duplicate controls. No NullReference/MissingMethod/InvalidProgram stacks in new logs.
+- Evidence: inline computer-use observations and ignored build/v0.11.3/ui/owner.log and guest.log. No full network acceptance repeated. Test processes stopped and computer-use kernel reset after observation; existing local server and user game not terminated.
+- Bundled Windows server rebuilt from deployed room/explosion source. Existing Release assets remain immutable; publish v0.11.3 / package0.11.3.0. Deployment and artifact checks pending.

@@ -189,7 +189,7 @@ public sealed class LanRoomUI : MonoBehaviour
             editName = string.Empty;
             renameMessage = string.Empty;
         }
-        readyLabel.text = isReady ? "\u53d6\u6d88\u51c6\u5907" : isOwner ? "\u51c6\u5907" : "\u5f00\u59cb\u6e38\u620f";
+        readyLabel.text = isReady ? "\u53d6\u6d88\u51c6\u5907" : "\u51c6\u5907";
         if (capacity == 0)
         {
             statusLabel.text = "\u6b63\u5728\u8fde\u63a5\u623f\u95f4";
@@ -221,6 +221,19 @@ public sealed class LanRoomUI : MonoBehaviour
                 memberLabel.text = builder.ToString();
             }
         }
+    }
+
+    private void OnDisable()
+    {
+        renaming = false;
+        if (renameButton != null)
+            renameButton.gameObject.SetActive(false);
+    }
+
+    private void OnDestroy()
+    {
+        if (renameButton != null)
+            Destroy(renameButton.gameObject);
     }
 
     private void OnGUI()
