@@ -137,7 +137,8 @@ public static class EcsBattleConnect
             var send = Method(attempt.Peer, "Send");
             foreach (var packet in attempt.Packets) send.Invoke(attempt.Peer, new object[] { packet });
             EcsDiagnostics.Trace("connect.complete_ms", (int)attempt.Timer.ElapsedMilliseconds);
-            attempt.Timer.Restart();
+            attempt.Timer.Reset();
+            attempt.Timer.Start();
             awaitingJoin = attempt;
         }
         catch (Exception error)
