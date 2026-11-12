@@ -42,6 +42,7 @@ def git_commit():
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--version", required=True, help="release version, for example 0.4")
+    parser.add_argument("--package-version", help="Numeric executable/update version when promoting a newer numbered candidate")
     parser.add_argument("--client", type=Path, default=DEFAULT_CLIENT, help="prepared public client directory")
     parser.add_argument("--host", default=DEFAULT_HOST, help="address written to server.txt")
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
@@ -60,10 +61,12 @@ def main():
     archive = args.output / "Mini-Battlegrounds-LAN-Windows.zip"
     if archive.exists():
         archive.unlink()
-    build(archive, args.client, args.host, args.version)
+    package_version = args.package_version or args.version
+    build(archive, args.client, args.host, package_version)
 
     manifest = {
         "version": args.version,
+        "package_version": package_version,
         "tag": f"lan-player-v{args.version}",
         "host": args.host,
         "client": str(args.client),
@@ -86,7 +89,7 @@ def main():
     if not base_url.lower().startswith("https://"):
         parser.error("New update download URLs must use HTTPS.")
     latest = {
-        "version": args.version,
+        "version": package_version,
         "tag": manifest["tag"],
         "url": f"{base_url}/{archive.name}",
         "bytes": manifest["bytes"],

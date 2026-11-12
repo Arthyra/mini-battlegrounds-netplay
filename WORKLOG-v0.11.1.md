@@ -83,3 +83,9 @@ Local scratch/build/test results will be kept under ignored `build/v0.11.1/`. Ea
 - Current public egress changed since morning; added four temporary current-source /32 cloud rules, recorded in ignored ecs-test-securitygroup-current.json. Both candidate9 processes automatically recovered login after access was restored, without restarting. Do not infer this proves the initial PC2 outage cause. Remove both sets of temporary rules after testing.
 - New launcher rejected forged signature and corrupt signed ZIP fixture; all four installed candidate9 hashes remained correct. Legacy0.10.8 full relaunch and interrupted download remain unverified. Restored original desktop shortcut and verified its hash matches backup.
 - Delivery archive: outputs/MiniBattlegrounds-v0.11.1.9-ECS-Acceptance.zip, SHA2566f84703c4571735b56c49b9222908f9e4c09bb574363659ebb4f85d52fac76fa. Still a candidate, no stable release. Pavement artifact remains OPEN / not reproduced in latest diagnostic smoke, not declared fixed.
+
+## Release decision — explicit user authorization
+
+- User explicitly cancelled further physical two-PC retesting and requested formal publication. This supersedes the earlier physical-retest release gate; waived/unexecuted checks remain NOT RUN, never PASS. Publish v0.11.1 with known limits and keep remaining defects tracked.
+- Public release tag v0.11.1 uses numeric package/update version0.11.1.10 so candidate0.11.1.9 installs can upgrade. Production compilation omits ECS_ACCEPTANCE; test overrides and native fault tools are excluded.
+- Production battle socket inspection found no connected battle clients; server.py deployed baseline hash matches the expected v0.11.0 input. Production code delta is only writer-owned UDP-warning cleanup. Back up before applying it, preserve profiles/data/signing material.
