@@ -72,6 +72,17 @@ Goal：完成 ECS 模式开发、稳定性验证、HTTPS 自动更新与可靠�
 - 10 轮 soak：RSS 稳定（29.8→30.0 MB）、fd 稳定（11）无泄漏；轮间竞态由重试吸收
 - 发现并修复：重登录丢失房主（`316d0d9`）；finish_round 竞态（测试侧自愈）
 
+### HTTPS 证书链问题（真实客户端发现，已修复）
+- 真实用户升级到 0.10.9 后启动器报"未能创建 SSL/TLS 安全通道"
+- 根因：nginx 443 证书链 = **ECDSA + 新根 ISRG Root YE**（Let's Encrypt 2025），旧 Windows 信任库无此根
+- 修复：`certbot --key-type rsa --preferred-profile shortlived` 新签 RSA IP 证书
+  （`mbg-update-rsa`，ISRG Root X1），nginx 8445 端口独立服务 `/mbg-update/`
+- 启动器改为三入口顺序尝试：8445 RSA → 443 ECDSA → 8080 旧 HTTP；
+  **每个入口都强制 RSA-SHA256 签名校验**，真实性不依赖传输层
+- 验证：8445 的 .NET TLS 握手 200、证书 RSA/SHA256、双入口清单/ZIP md5 一致
+- 0.10.9 已发布 GitHub Release（`lan-player-v0.10.9`）
+- 注意：旧版启动器（内嵌单一 443 URL）无法自更新到新证书链，需一次手动替换
+
 ### 构建一致性
 - 0.10.9 构建输入：`_local-archive/public-client-v0109`（= v0108 底 + 最新补丁 Assembly-CSharp.dll）
 - manifest commit = `d3b94a5`+；dist/update/latest.json 双入口 md5 与本地一致
