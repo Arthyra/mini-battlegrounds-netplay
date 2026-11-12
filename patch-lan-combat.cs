@@ -875,10 +875,30 @@ internal static class PatchCombat
         var peerConnect = managerConnect.Body.Instructions.Single(i =>
             i.OpCode == OpCodes.Callvirt && ((MethodReference)i.Operand).Name == "Connect");
         peerConnect.OpCode = OpCodes.Call;
-        peerConnect.Operand = module.ImportReference(Method(diagnostics, "Connect", "System.Object", "System.String", "System.Int32"));
+        var asyncConnect = ui.GetType("EcsBattleConnect");
+        peerConnect.Operand = module.ImportReference(Method(asyncConnect, "Begin", "System.Object", "System.String", "System.Int32"));
+        var tcpPeer = module.GetType("CS.TcpPeer");
+        var tcpSend = Method(tcpPeer, "Send", "System.Byte[]");
+        var sendIl = tcpSend.Body.GetILProcessor();
+        var sendFirst = tcpSend.Body.Instructions[0];
+        Before(sendIl, sendFirst, sendIl.Create(OpCodes.Ldarg_0), sendIl.Create(OpCodes.Ldarg_1),
+            sendIl.Create(OpCodes.Call, module.ImportReference(Method(asyncConnect, "QueueSend", "System.Object", "System.Byte[]"))),
+            sendIl.Create(OpCodes.Brfalse, sendFirst), sendIl.Create(OpCodes.Ret));
+        var tcpUpdate = Method(tcpPeer, "Update", "System.Single");
+        var updateIl = tcpUpdate.Body.GetILProcessor();
+        var updateFirst = tcpUpdate.Body.Instructions[0];
+        Before(updateIl, updateFirst, updateIl.Create(OpCodes.Ldarg_0),
+            updateIl.Create(OpCodes.Call, module.ImportReference(Method(asyncConnect, "IsPending", "System.Object"))),
+            updateIl.Create(OpCodes.Brfalse, updateFirst), updateIl.Create(OpCodes.Ret));
+        var tcpClose = Method(tcpPeer, "Close");
+        Before(tcpClose.Body.GetILProcessor(), tcpClose.Body.Instructions[0],
+            Instruction.Create(OpCodes.Ldarg_0),
+            Instruction.Create(OpCodes.Call, module.ImportReference(Method(asyncConnect, "Cancel", "System.Object"))));
         var mainUpdate = Method(module.GetType("Main"), "Update");
         mainUpdate.Body.GetILProcessor().InsertBefore(mainUpdate.Body.Instructions[0],
             mainUpdate.Body.GetILProcessor().Create(OpCodes.Call, module.ImportReference(Method(diagnostics, "Frame"))));
+        mainUpdate.Body.GetILProcessor().InsertBefore(mainUpdate.Body.Instructions[0],
+            mainUpdate.Body.GetILProcessor().Create(OpCodes.Call, module.ImportReference(Method(asyncConnect, "Pump"))));
 
         var world = module.GetType("CS.WorldServerProxy");
         var receive = Method(world, "OnReceive", "System.Byte[]");
@@ -1691,8 +1711,6 @@ internal static class PatchCombat
         var alreadyQueued = onDisconnect.Create(OpCodes.Ret);
         var givingUpExit = onDisconnect.Create(OpCodes.Ldstr, "od");
         InsertTrace(onDisconnect, first, trace, "od", 0);
-        onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Ldc_I4_0));
-        onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Stsfld, tcpActive));
         // Ignore disconnects from a replaced/stale proxy. ConnectToBattleTcpServer
         // swaps this instance; its old callback must not re-arm pending after a
         // successful reconnect.
@@ -1700,6 +1718,8 @@ internal static class PatchCombat
         onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Call, Method(manager, "get_Instance")));
         onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Callvirt, Method(manager, "GetBattleTcpServerProxy")));
         onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Bne_Un, alreadyQueued));
+        onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Ldc_I4_0));
+        onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Stsfld, tcpActive));
         onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Ldsfld, inProgress));
         onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Brtrue, alreadyQueued));
         onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Ldsfld, givingUp));

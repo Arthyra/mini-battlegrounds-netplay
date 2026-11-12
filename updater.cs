@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Diagnostics;
+using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
 using System.Text;
@@ -98,6 +99,95 @@ internal sealed class Updater : Form
         Application.DoEvents();
     }
 
+    private static void InstallFiles(string source, string root, Action<string> log, Action<int> progress)
+    {
+        var files = Directory.GetFiles(source, "*", SearchOption.AllDirectories);
+        var destinations = new List<string>();
+        var backups = new Dictionary<string, string>();
+        var backupRoot = Path.Combine(root, "update-backup-" + Guid.NewGuid().ToString("N"));
+        // Fail before changing files when an existing game/launcher still holds
+        // a target open. Later races are covered by atomic replacement/rollback.
+        foreach (var file in files)
+        {
+            var relative = file.Substring(source.Length).TrimStart('\\', '/');
+            var target = Path.Combine(root, relative);
+            if (File.Exists(target))
+                using (File.Open(target, FileMode.Open, FileAccess.Read, FileShare.None)) { }
+        }
+        Directory.CreateDirectory(backupRoot);
+        try
+        {
+            for (int index = 0; index < files.Length; index++)
+            {
+                var relative = files[index].Substring(source.Length).TrimStart('\\', '/');
+                var target = Path.Combine(root, relative);
+                var temporary = target + ".update-" + Guid.NewGuid().ToString("N");
+                var directory = Path.GetDirectoryName(target);
+                Directory.CreateDirectory(directory);
+                var backup = Path.Combine(backupRoot, relative);
+                if (File.Exists(target))
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(backup));
+                    File.Copy(target, backup);
+                    backups.Add(target, backup);
+                    File.SetAttributes(target, FileAttributes.Normal);
+                }
+                else backups.Add(target, null);
+                try
+                {
+                    File.Copy(files[index], temporary);
+                    for (int attempt = 1; ; attempt++)
+                    {
+                        try
+                        {
+                            if (File.Exists(target)) File.Replace(temporary, target, null);
+                            else File.Move(temporary, target);
+                            destinations.Add(target);
+                            break;
+                        }
+                        catch (IOException error)
+                        {
+                            log("replace blocked " + relative + " attempt=" + attempt + " " + error.Message);
+                            if (attempt >= 3) throw;
+                            Thread.Sleep(1500);
+                        }
+                        catch (UnauthorizedAccessException error)
+                        {
+                            log("replace denied " + relative + " attempt=" + attempt + " " + error.Message);
+                            if (attempt >= 3) throw;
+                            Thread.Sleep(1500);
+                        }
+                    }
+                }
+                finally { if (File.Exists(temporary)) File.Delete(temporary); }
+                log("replaced " + relative);
+                progress((index + 1) * 100 / Math.Max(1, files.Length));
+            }
+        }
+        catch
+        {
+            bool restored = true;
+            destinations.Reverse();
+            foreach (var target in destinations)
+            {
+                try
+                {
+                    if (backups[target] == null) File.Delete(target);
+                    else File.Copy(backups[target], target, true);
+                }
+                catch (Exception error)
+                {
+                    restored = false;
+                    log("rollback failed " + target + " " + error.Message);
+                }
+            }
+            if (restored) Directory.Delete(backupRoot, true);
+            else log("Recovery backups retained at " + backupRoot);
+            throw;
+        }
+        Directory.Delete(backupRoot, true);
+    }
+
     private void RunUpdate()
     {
         try
@@ -121,6 +211,15 @@ internal sealed class Updater : Form
                     Thread.Sleep(150);
                 }
             }
+            if (parentPid > 0)
+            {
+                try
+                {
+                    if (!Process.GetProcessById(parentPid).HasExited)
+                        throw new IOException("旧启动器仍在运行，请关闭后重试更新。");
+                }
+                catch (ArgumentException) { }
+            }
             Set("正在安装更新…", 15);
             var files = Directory.GetFiles(source, "*", SearchOption.AllDirectories);
             var count = Math.Max(1, files.Length);
@@ -130,54 +229,8 @@ internal sealed class Updater : Form
                 try { File.AppendAllText(logPath, DateTime.Now.ToString("HH:mm:ss.fff") + " " + message + Environment.NewLine); } catch { }
             };
             log("update start: source=" + source + " root=" + root + " files=" + files.Length);
-            for (var i = 0; i < files.Length; i++)
-            {
-                var relative = files[i].Substring(source.Length).TrimStart('\\', '/');
-                var destination = Path.Combine(root, relative);
-                log("replace " + relative);
-                if (string.Equals(Path.GetFullPath(destination), Path.GetFullPath(Application.ExecutablePath), StringComparison.OrdinalIgnoreCase))
-                    continue;
-                var directory = Path.GetDirectoryName(destination);
-                if (!string.IsNullOrEmpty(directory))
-                    Directory.CreateDirectory(directory);
-                // Old installs may carry read-only files (early zips preserved
-                // the attribute); File.Copy(overwrite) fails on those.
-                if (File.Exists(destination))
-                    try { File.SetAttributes(destination, FileAttributes.Normal); } catch { }
-                // Security software and stale processes hold files briefly;
-                // retry each replacement before giving up.
-                for (var attempt = 1; ; attempt++)
-                {
-                    try
-                    {
-                        if (File.Exists(destination))
-                            try { File.SetAttributes(destination, FileAttributes.Normal); } catch { }
-                        File.Copy(files[i], destination, true);
-                        break;
-                    }
-                    catch (UnauthorizedAccessException copyError)
-                    {
-                        log("replace blocked " + relative + " (attempt " + attempt + "): " + copyError.Message);
-                        if (attempt >= 3)
-                        {
-                            log("replace FAILED " + relative);
-                            throw;
-                        }
-                        Thread.Sleep(1500);
-                    }
-                    catch (IOException copyError)
-                    {
-                        log("replace blocked " + relative + " (attempt " + attempt + "): " + copyError.Message);
-                        if (attempt >= 3)
-                        {
-                            log("replace FAILED " + relative);
-                            throw;
-                        }
-                        Thread.Sleep(1500);
-                    }
-                }
-                Set("正在安装：" + relative, 15 + (i + 1) * 78 / count);
-            }
+            InstallFiles(source, root, log,
+                percent => Set("正在安装更新…", 15 + percent * 78 / 100));
             try
             {
                 File.Delete(Path.Combine(root, "README.txt"));

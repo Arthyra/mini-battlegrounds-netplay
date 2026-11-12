@@ -31,5 +31,8 @@
 !/Collect-EcsEvidence.ps1
 !/ECS-ACCEPTANCE-v0.11.1.md
 !/build-acceptance.py
+!/ecs-battle-connect.cs
+!/test-updater-install.cs
+!/test-battle-connect.cs
 
 

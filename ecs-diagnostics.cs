@@ -1,8 +1,6 @@
 using System;
 using System.Diagnostics;
-using System.Globalization;
 using System.IO;
-using System.Reflection;
 using System.Threading;
 
 // Acceptance logging is opt-in. Only Connect/Frame timing is recorded.
@@ -61,23 +59,6 @@ public static class EcsDiagnostics
     {
         if (tag == "rx" && code != 1 && (code < 34 || code > 40)) return;
         Write("net tag=" + tag + " event=" + code);
-    }
-
-    public static bool Connect(object peer, string host, int port)
-    {
-        var timer = Stopwatch.StartNew();
-        bool success = false;
-        Write("connect.begin port=" + port);
-        try
-        {
-            success = (bool)peer.GetType().GetMethod("Connect").Invoke(peer, new object[] { host, port });
-            return success;
-        }
-        finally
-        {
-            Write("connect.end port=" + port + " success=" + success + " ms=" +
-                timer.Elapsed.TotalMilliseconds.ToString("F3", CultureInfo.InvariantCulture));
-        }
     }
 
     public static void Frame()

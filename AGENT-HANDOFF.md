@@ -6,7 +6,7 @@ Read `WORKLOG-v0.11.1.md` and `ECS-ACCEPTANCE-v0.11.1.md` for current unpassed g
 
 Correct patch input on this machine is `C:/Users/Example/.deepseek/mbg-lan-test/Assembly-CSharp-input.dll`. `workcopy/Assembly-CSharp.dll` fails the collision-branch input guard. Do not use it as the unpatched input.
 
-`LanRoomUI.dll` now also requires `ecs-diagnostics.cs` alongside `lan-room-ui.cs` and `lan-scoreboard.cs`. Compile with `/noconfig /nostdlib` and explicit references to the client runtime's mscorlib, System, System.Core, UnityEngine and UnityEngine.UI. This prevents modern framework methods unsupported by the bundled Mono. Compile with `ECS_ACCEPTANCE` only for the isolated test port override. Release builds omit that symbol.
+`LanRoomUI.dll` now also requires `ecs-diagnostics.cs` and `ecs-battle-connect.cs` alongside `lan-room-ui.cs` and `lan-scoreboard.cs`. Compile with `/noconfig /nostdlib` and explicit references to the client runtime's mscorlib, System, System.Core, UnityEngine and UnityEngine.UI. This prevents modern framework methods unsupported by the bundled Mono. Compile with `ECS_ACCEPTANCE` only for the isolated test port override. Release builds omit that symbol. `build-acceptance.py` automates this in an immutable output directory.
 
 All formal physical-PC, firewall and upgrade gates remain as recorded in the v0.11.1 worklog, independently of earlier v0.11.0 report conclusions.
 

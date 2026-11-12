@@ -35,7 +35,7 @@ def main():
     run(csc, "/nologo", "/noconfig", "/target:library", "/nostdlib", "/define:ECS_ACCEPTANCE",
         *("/reference:" + str(runtime / name) for name in
           ("mscorlib.dll", "System.dll", "System.Core.dll", "UnityEngine.dll", "UnityEngine.UI.dll")),
-        "/out:" + str(output / "LanRoomUI.dll"), "lan-room-ui.cs", "lan-scoreboard.cs", "ecs-diagnostics.cs")
+        "/out:" + str(output / "LanRoomUI.dll"), "lan-room-ui.cs", "lan-scoreboard.cs", "ecs-diagnostics.cs", "ecs-battle-connect.cs")
     run(csc, "/nologo", "/reference:" + str(args.cecil),
         "/out:" + str(tools / "PatchLanCombat.exe"), "patch-lan-combat.cs")
     run(tools / "PatchLanCombat.exe", args.input, output / "Assembly-CSharp.dll", output / "LanRoomUI.dll")

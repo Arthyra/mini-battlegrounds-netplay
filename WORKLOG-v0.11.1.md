@@ -14,6 +14,10 @@
 
 ## Evidence
 
+- P1 updater failure reproduced with the real pre-fix updater and a Windows FileShare.None lock: first file was overwritten before a later locked target failed (`locked-before.txt`). New installer preflights target occupancy, replaces files atomically with rollback copies, and restores prior files on failure. Seven compiled installer tests PASS, including occupied-file rejection, injected partial-install rollback, success and preserved unrelated Zone.Identifier (`installer-after.txt`). Whole-version upgrade/relaunch matrix still pending.
+- Candidate async battle Connect now initiates only Socket.BeginConnect outside the Unity frame; Main.Update polls completion, adopts socket and starts the original receive loop. Join Send is queued until adoption. Per-attempt identity prevents stale Close cancelling a newer attempt. No Unity object is accessed by a background connect worker. Nine compiled socket/helper tests PASS (`battle-connect-tests.txt`), including refusal, deadline and replacement cancellation. This is NOT a real firewall blackhole PASS.
+- Moved stale battle-disconnect identity guard ahead of clearing the shared heartbeat-active flag, preventing an obsolete proxy callback disabling the new proxy's heartbeat.
+
 - `7fb5e48` adds the isolated-instance/physical-PC kit. Candidate Unity runtime initially exposed unsupported `Monitor.Enter(object, ref bool)` from framework-default compilation. Fixed to legacy Monitor.Enter/Exit and compiled against the bundled runtime using `/noconfig /nostdlib`; new candidate enters the original lobby and map 102 in two actual local Unity processes, with no exception stacks in their new logs. This is LOCAL SMOKE, not physical/ECS acceptance.
 - Measured local normal synchronous battle Connect on Unity thread 1: 6.817 ms and 6.809 ms in the two clients. Fault-path timing remains pending.
 - External 432xx protocol probe closes/times out while ECS-loopback protocol probe returns message 20. Instance INPUT policy ACCEPT. New-port external reachability remains an open preparation gate; do not claim ECS candidate play PASS.
