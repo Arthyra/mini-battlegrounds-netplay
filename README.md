@@ -1,154 +1,78 @@
 # Mini Battlegrounds LAN · 地图 102
 
-面向 Mini Battlegrounds Windows Steam Build 2655148 的局域网原型。使用本地测试身份，每局可设 1 至 8 人。102 是独立的小地图，大厅常驻，所有玩家离开对局后可重新准备开下一局。
+基于 Mini Battlegrounds Windows Steam 版本的非官方联机实验项目，为地图 102 提供独立的房间、战斗和复活玩法。支持 **1～8 人**，使用项目自己的登录身份；**ECS 公网联机**和**局域网直连**共用同一套服务端与战斗协议。
 
-## 下载和联机
+> 这是持续开发中的 Mod，不是原游戏的官方在线服务。仓库以源码和补丁工具为主，不包含完整游戏客户端、原始 APK 或所有资源构建输入。
 
-[下载 Windows 玩家包](https://github.com/Ash-Rise/mini-battlegrounds-lan/releases/download/lan-player-v0.9.17/Mini-Battlegrounds-LAN-Windows.zip)。把整个 ZIP 解压，双击 `Start Game.exe`。玩家包默认连接公网 ECS `198.51.100.10`，局域网时在启动器里改地址即可。包已带 102 复活地图和匹配的客户端，朋友无需安装 Steam 或 Python。
+## 版本与进展
 
-房主开房后，启动器会搜索局域网。只找到一个房间会直接连接；搜不到时可以粘贴房主的 IPv4，再点「加入房间」。可以给 `Start Game.exe` 创建桌面快捷方式。
+- **最新正式版：v0.11.1 — ECS 连接恢复修复**（[Release](https://github.com/Ash-Rise/mini-battlegrounds-lan/releases/tag/lan-player-v0.11.1)）。启动器内部版本为 `0.11.1.10`。
+- **上一里程碑：v0.11.0 — ECS Stable**（[Release](https://github.com/Ash-Rise/mini-battlegrounds-lan/releases/tag/lan-player-v0.11.0)）。
 
-仓库为私有，朋友需要仓库访问权限。[下载源码 ZIP](https://github.com/Ash-Rise/mini-battlegrounds-lan/archive/refs/heads/main.zip) 用于开发。
+v0.11.0 完成了战斗断线恢复、重登、UDP 同步与服务端静默检测，并引入签名更新。v0.11.1 进一步修复 TCP 正常关闭后残留连接与登录卡住的问题，将战斗重连的连接等待移出 Unity 主线程，添加入场响应超时和重试限制，修复旧连接误清理新连接任务的竞态；新启动器只通过 HTTPS 获取更新，同时改进更新失败回滚。
 
-## 局域网开房
+已有 ECS 双客户端对局和断线恢复测试，但**不能据此声称全部真实网络故障场景已通过**。两台物理 Windows 的多轮故障回归、防火墙 TCP 黑洞、异常掉线及场景重载亮格问题仍在跟踪。
 
-需要 Windows、Python 3.11 或更新版本，以及已准备好的同版本 `client` 目录。房主在项目目录执行：
+## 玩法概览
+
+- **房间与回合**：大厅选择角色/皮肤、准备、房主开局；战斗结束后可重新准备。地图为 102。
+- **战斗**：主武器、副武器、近战、换弹、狙击瞄准、伤害、倒地与复活，以及击杀榜。
+- **道具与场景**：手雷、燃烧弹、急救包、掉落武器、可交互车辆、门与可破坏物件。
+- **基础操作**：WASD 移动；1/2/3 切换主武器/副武器/近战；R 换弹；F 交互/上下车；4 投掷物；5 急救包；Enter 聊天；F2 改名。
+
+## 运行方式
+
+### 已有完整 Windows 玩家包
+
+在获得授权的私有测试环境中，从对应 [Release](https://github.com/Ash-Rise/mini-battlegrounds-lan/releases) 下载适用的 Windows 包，**完整解压**后运行 `Start Game.exe`。
+
+- **ECS / 公网**：通过启动器连接已授权的云端房间，或手动指定可访问的服务器 IPv4。
+- **LAN / 局域网**：房主在 Windows 启动器选择“创建局域网房间”；其他玩家选择“搜索局域网房间”或手动填写房主 IPv4。
+- 创建房间需要安装包包含 `server/server.exe`。部分仅供加入的客户端包可能不含服务端；这种包不能开房。
+
+当前玩家包及其部分数据依赖私有、预处理后的游戏资源；本 README **不表示允许公开镜像或再分发这些资源**。
+
+### 使用源码运行服务端
+
+需要 Python 3.11+、对应版本的已准备客户端及服务端依赖数据。LAN 房主可在项目目录执行：
 
 ```powershell
-python .\server.py --share-client
+python server.py --players 8 --share-client --admin-port 0
 ```
 
-服务端会选择本机的局域网 IPv4、生成已配置好地址的客户端 ZIP、打开房主客户端，并在终端打印邀请链接。朋友在同一局域网内打开链接，解压后运行 `client\CrazyShooter.exe`。朋友只需要这个链接和 Windows。多网卡机器可用 `--host 192.0.2.20` 指定朋友可达的地址。
+它会选择本机 LAN IPv4、启动房间服务，并在局域网内提供临时邀请链接。多网卡环境可显式使用 `--host <房主局域网IPv4>`；朋友必须能连到这个地址。若已有完整房主版玩家包，更推荐直接使用启动器开房，不需要朋友安装 Python。
 
-- 客人在大厅点击「开始游戏」进入匹配中，再点「取消准备」可以退出队列。大厅显示已准备人数、当前房间人数和上限。
-- 房主先点击「准备」，然后点击旁边的「开始游戏」。只有开局时已准备的玩家进入 102。房间默认最多 8 人，`--players` 可以设为 1 至 8。
-- 开局前退出大厅会释放名额。对局里所有玩家返回大厅或退出后，房间自动恢复等待准备。重新准备后由房主开下一局。
-
-游戏使用 TCP 43120、43123、43134 和 UDP 43135。局域网搜索使用 UDP 43122。启用邀请链接时额外使用 TCP 43121。分享链接在房主进程运行期间有效，地址应位于可信的局域网。
-
-### 本机测试和手动配置
-
-当前副本已导出服务端所需的地图和皮肤数据。替换地图或皮肤资源包后，重新导出：
-
-```powershell
-python -m pip install UnityPy==1.25.2 numpy
-python .\export-local-data.py
-```
-
-本机多开时，可以启动回环地址的房间，再给每个客户端指定独立档案：
-
-```powershell
-python .\server.py --players 2
-# 在另一窗口运行以下两行
-Start-Process .\client\CrazyShooter.exe -WorkingDirectory .\client -ArgumentList '-lan-profile=slot-1'
-Start-Process .\client\CrazyShooter.exe -WorkingDirectory .\client -ArgumentList '-lan-profile=slot-2'
-```
-
-角色和皮肤选择保存在服务端的 `lan-profiles.json`。没指定档案时客户端按机器名生成 `pc-<机器名>`，不会和房主的 `slot-1` 冲突。想固定档案时，重启客户端后继续使用同一个档案名。服务器显示的名字可以用 `-lan-name=昵称` 指定，例如 `-lan-profile=slot-1 -lan-name=玩家一`；名字会按档案保存，之后不带参数启动也会继续使用。进入联机大厅后，点 LanRoomUI 上的「改名」按钮或按 F2 可以改昵称；服务端按档案永久保存。
-
-如果已经另有方式分发客户端，可用 `python .\prepare-lan-client.py 192.0.2.20 .\client-for-lan` 生成连接指定地址的副本。
-
-### 公网 ECS
-
-服务端放在有公网 IPv4 的 Linux 上时，把对外地址和本地绑定地址分开：
+对于单独部署的公网 Linux 服务器，可使用：
 
 ```bash
-python3 server.py --players 8 --host <公网IP> --bind 0.0.0.0
+python3 server.py --players 8 --host <服务器公网IPv4> --bind 0.0.0.0
 ```
 
-安全组放行 TCP `43120`、`43123`、`43134` 和 UDP `43135`。第一个登录大厅的玩家成为房主，房主要先连接、先准备，再点「开始游戏」。朋友客户端用 `python .\prepare-lan-client.py <公网IP> .\client-public` 生成，或启动客户端时加 `-lan-host=<公网IP>`。公网客户端不要提交到 Git，只放在本地或网盘分发。
+须正确设置防火墙/安全组：TCP 43120（登录）、43123（世界）、43134（战斗），UDP 43135（战斗状态）。LAN 自动发现还使用 UDP 43122；LAN 临时下载链接使用 TCP 43121。不要将管理 API、管理 Token 或测试故障注入服务直接暴露公网。
 
-## 联机恢复与自动更新签名（开发者说明）
+### 离线 LAN 与已知限制
 
-- 战斗 TCP 重连：将原来在 `OnDisconnect` 中执行的长时间同步 Sleep 重试，改为通过游戏的 `LocalController.UpdateInput` 调度单次尝试。注意，单次 `ConnectToBattleTcpServer` 仍可能阻塞游戏线程；必须在 Windows 客户端上测试连接超时和断网时的帧率。
-- 服务器支持对半开旧战斗连接的接管，并在加载阶段保留原有 90 秒加载时限。断线后其他正常玩家不再收到重新初始化的战斗快照。客户端重连消息 34/37 的正常收发仍不等于状态完全恢复，需验证车辆、掉落物等动态状态。
-- 自动更新 `latest.json` 必须包含 RSA-SHA256 `signature`，启动器使用内置公钥检查签名，并强制校验 ZIP 的 SHA256。当前 ECS 仍使用 HTTP：签名防止伪造或篡改更新，但**不等于 HTTPS 加密传输**。以后配置好 HTTPS 域名，可在构建时使用 `--update-base-url https://域名/update` 指定签署的下载地址；修改清单获取 URL 需要同步更新启动器。
-- 发布命令新增 `--signing-key <私钥路径>`（也支持 `MBG_UPDATE_SIGNING_KEY` 环境变量），需要在发布环境安装 OpenSSL 命令行工具。私钥须与 `lan-launcher.cs` 中嵌入的固定 RSA 公钥对应。不要把私钥上传仓库、Release 或玩家包；丢失私钥后，必须更新客户端公钥才能继续发布可信更新。
-- **当前仓库不包含所有 Windows 游戏 DLL/资源和构建输入。源代码提交不是客户端发布。** 必须重新打包 DLL/启动器，再在两台 Windows 机器验证故障处理。
+LAN 游戏的数据平面不应依赖 ECS；但启动器的公网自动更新检查可能在离线时失败，需确保它不会阻塞 LAN 游戏。LAN 的完全离线双机、不同网卡和防火墙场景还需专项验收，**目前不宣称 LAN 已全面稳定**。
 
-## 玩法与验证
+## 源码结构
 
-- WASD 移动，1 切主武器，2 切副武器，3 切砍刀。滚轮向下依次切 1 → 2 → 3，向上反向。按 Q 切回上一把使用过的武器。鼠标左键攻击，备弹无限，弹匣打空后自动换弹，也可以按 R 手动换弹。98K、SG550 和 AWM 按住鼠标右键扩大视野，并播放 APK 原版侧身持枪动画，开镜射击显示原版狙击弹拖尾。98K 和 AWM 一次按下一发，SG550 可按住连射。狙击散布使用 APK 原版的三维方向、逐发累积和随时间恢复算法。该 APK 的腰射下限为 2°，开镜下限为 4°。切到刀再切回狙击枪会重置开火间隔，仍需等装备动作完成。靠近车辆或门时，F 用于上下车或开关门。每车四座，驾驶位用 WASD 操控。墙和其他车辆会挡住车身。车可以撞开门板、撞倒地图里带可破坏标记的自行车/电动车和电线杆，并驶入草丛。草丛内的角色对同一草丛外的敌人隐藏。
-- 开局随机发一把主枪、一把手枪和一把砍刀，枪支分别记录弹匣余量。普通枪弹由射手客户端判定命中，砍刀由服务端按距离、角度和静态障碍判断。倒地可爬行，倒计时从 3.0 秒开始，结束时原地站起、恢复满血并自动装备随机抽到的另一把枪，随后获得 1 秒保护。
-- 按 4 选择投掷物，再按 4 循环切换。按住鼠标左键准备，松开投掷。出生和复活时各带一枚手雷和燃烧弹。手雷造成爆炸伤害，燃烧弹持续灼烧。
-- 出生和复活时携带一个急救包。按 5 切出急救包。受伤时按 5 或持包时按左键使用，读条 4 秒后恢复 400 血，上限为满血。切换武器、上车或倒地会中断读条。
-- 玩家倒地时，主枪和副枪分别掉落。其他玩家靠近掉落物按 F，可拾取并替换对应枪位。掉落物保留原枪的弹匣余量与皮肤。
-- 对局内按 Enter 打开聊天框。输入 `/<gun>` 换枪，例如 `/98k`、`/dg` 或 `/rpg`。手枪替换副武器，其他枪替换主武器。`/guns` 列出枪名，`/help` 显示指令，`/pos` 显示坐标，`/down` 测试倒地。指令和回复只对输入者可见。
-- 大厅可选两名角色及 195 条人物和物品皮肤，已选的角色和服装会带进对局。地图上的车默认使用甲壳虫、BJ40 和五菱外观。服务端加 `--stock-vehicles` 可切回红色两厢车、蓝色 F-150 和原版厢式车。
-- 无论车辆是否有人乘坐，任何玩家都能用枪、近战或爆炸伤害攻击。车辆耐久归零时，车上的人及原版爆炸半径内的玩家倒地。低速剐蹭每次接触扣少量血，达到 8 米/秒的撞击会直接让玩家倒地。这个阈值用于本地模式。两种情况都沿用 3 秒复活和 1 秒出生保护。
-- 同一台电脑的旧构建已验证四个 Windows 客户端进图、位置同步，以及双客户端普通枪弹伤害和复活。当前八人测试由一个 Windows 客户端和七个协议客户端组成，验证进图、位置转发和狙击伤害。保护时长通过协议测试。火箭筒、手雷及燃烧弹由服务端计算范围伤害。火箭筒可摧毁原地图里带可破坏标记的门和自行车。击败敌人时复用原版广播和个人淘汰计数。枪库共有 18 把枪，换弹时长取自国际版 APK 的枪械表。多台实体电脑联机和门的实际动画待验证。
+| 文件 | 作用 |
+| --- | --- |
+| `server.py` | 登录、房间、战斗、TCP/UDP 同步与复活规则 |
+| `lan-launcher.cs`、`updater.cs` | Windows 启动器与更新器 |
+| `patch-lan-combat.cs` | Unity Mono/Cecil 战斗与网络补丁 |
+| `lan-room-ui.cs`、`lan-scoreboard.cs` | 房间 UI 与计分板 |
+| `lan_share.py`、`prepare_lan_client.py` | LAN 临时分享与客户端地址准备 |
+| `build-friend-zip.py`、`build-release.py` | 从已准备的客户端生成分发包、签名更新清单 |
+| `test-public-battle.py`、`test-connection-lifecycle.py` | 协议与连接生命周期回归测试 |
+| `AGENTS.md` | Agent 开发约定 |
 
-## 仓库内容
+`build-release.py` 需要本地、未提交的合法构建输入，以及与启动器内置公钥配对的签名私钥。发行清单及 ZIP 的地址应按部署环境配置，不能将个人 ECS 地址或密钥硬编码进公共版本。源码提交成功不等于 Windows DLL 已重新构建、测试或发布。
 
-- `server.py` 实现登录、大厅、对局和复活规则。
-- `prepare-lan-client.py` 从已准备好的 102 客户端生成局域网副本。
-- `patch-local-login.py` 是已准备 102 副本的本地登录补丁，应用时备份程序集。
-- `patch-lan-combat.cs` 是命中、复活和房间消息的 Unity Mono 补丁源码，构建工具使用 Mono.Cecil 0.11.6。
-- `lan-room-ui.cs` 使用原客户端的 UnityEngine、UnityEngine.UI 和 Mono mscorlib 编译为 `LanRoomUI.dll`。构建战斗补丁时给工具传入原程序集、输出程序集和该 DLL 三个路径，再把输出程序集和 UI DLL 一同放到客户端的 Managed 目录。
-- `lan_share.py` 提供会话内的客户端打包和下载。
-- lan-launcher.cs 和 build-friend-zip.py 用于从已准备好的客户端生成 Windows 玩家 ZIP。更新两份客户端 DLL 后运行 python .\build-friend-zip.py <输出 ZIP>。
-- `export-local-data.py` 从本地 102 客户端导出车辆碰撞数据、可破坏道具和皮肤目录。
+## 测试与文档
 
-Git 跟踪服务端和补丁源码。预装的游戏客户端通过私有 Release 提供。原始 APK、导出数据和运行日志留在本地。全新的客户端需要先从本地游戏安装和 APK 手工准备 102 场景、贴图、小地图及开局装备补丁，当前仓库的脚本以已经准备好的 102 副本为输入。
+当前活跃的进度与未完成测试以 [Issue #7](https://github.com/Ash-Rise/mini-battlegrounds-lan/issues/7)、`WORKLOG-v0.11.1.md`、`ECS-ACCEPTANCE-v0.11.1.md` 为准。`ECS-RELEASE-REPORT-v0.11.1.md` 是 v0.11.1 的发布记录；`WORKLOG-v0.11.0.md` 和 `ECS-STABLE-REPORT-v0.11.0.md` 是 **v0.11.0 历史记录**，不是后续版本的验收声明。
 
-Windows 客户端的 `unit` 包从 APK 的原版角色控制器移植 `Hold_Rifle_Snipe` 和 `Fire_Rifle_Snipe`。移植时把 Unity 2017 动作的 200 个索引和 21 个平移自由度缩为 Unity 5.6 的 161 和 8，只去掉额外的空项，并调整动画数据的原生分配大小。`database` 的 TextData 包含大厅的复活模式名称和说明（10990、10991）。为规避 102 人行道彩纹，Windows 场景包的 Terrain（PathID 2562）不采样 Android 烘焙光照层。
+## 公开发布与资源说明
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+仓库目前用于私有开发，包含内部部署及实验历史；**不能直接将整个私有仓库或历史 Release 改为 Public**。将来发布公开 LAN 仓库时，应另行清理历史和个人环境信息，移除专有游戏资产，提供可以由用户自己持有的原版合法构建所生成补丁客户端的安装流程，并确认源码及资源的许可边界。

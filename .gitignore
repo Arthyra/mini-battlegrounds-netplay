@@ -2,6 +2,7 @@
 /*
 !/.gitignore
 !/README.md
+!/AGENTS.md
 !/server.py
 !/prepare-lan-client.py
 !/patch-local-login.py
