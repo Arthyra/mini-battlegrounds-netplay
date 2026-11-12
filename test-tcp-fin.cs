@@ -48,7 +48,8 @@ internal static class TcpFinTest
         });
         thread.IsBackground = true;
         thread.Start();
-        server.Send(new byte[] { 4, 0, 1, 0 });
+        bool truncated = args.Length > 1 && args[1] == "truncated";
+        server.Send(truncated ? new byte[] { 4 } : new byte[] { 4, 0, 1, 0 });
         server.Shutdown(SocketShutdown.Send); // FIN, not RST or process termination.
         bool returned = thread.Join(1000);
         bool cleared = socketField.GetValue(peer) == null;
@@ -64,7 +65,7 @@ internal static class TcpFinTest
         thread.Join(1000);
         server.Close(); listener.Stop();
         if (receiveError != null) { Console.Error.WriteLine(receiveError); return 2; }
-        if (!returned || !cleared || bytes != 4 || earlyCallbacks != 0 || packets != 1 || callbacks != 1)
+        if (!returned || !cleared || bytes != (truncated ? 1 : 4) || earlyCallbacks != 0 || packets != (truncated ? 0 : 1) || callbacks != 1)
         { Console.WriteLine("FAIL graceful EOF cleanup / final packet preservation"); return 1; }
         Console.WriteLine("PASS graceful EOF cleanup / final packet preservation"); return 0;
     }

@@ -1609,6 +1609,19 @@ internal static class PatchCombat
             var update = basePeer.Methods.FirstOrDefault(x => x.Name == "Update" && x.Parameters.Count == 1);
             if (update != null)
             {
+                // Dispatch has already delivered every complete frame. At EOF
+                // an incomplete trailing frame can never be completed; discard
+                // that tail rather than keeping a dead peer alive forever.
+                var sizeAtEof = update.Body.Instructions.Single(i =>
+                    i.OpCode == OpCodes.Callvirt && i.Operand is MethodReference &&
+                    ((MethodReference)i.Operand).DeclaringType.FullName == "CS.NetBuffer" &&
+                    ((MethodReference)i.Operand).Name == "get_Size");
+                if (sizeAtEof.Next.OpCode != OpCodes.Ldc_I4_0 || sizeAtEof.Next.Next.OpCode != OpCodes.Bgt)
+                    throw new InvalidOperationException("Unexpected TCP EOF buffer guard");
+                sizeAtEof.Operand = Method(module.GetType("CS.NetBuffer"), "Clear");
+                sizeAtEof.Next.OpCode = OpCodes.Nop;
+                sizeAtEof.Next.Next.OpCode = OpCodes.Nop;
+                sizeAtEof.Next.Next.Operand = null;
                 var call = update.Body.Instructions.FirstOrDefault(i =>
                     i.OpCode == OpCodes.Callvirt && i.Operand is MethodReference &&
                     ((MethodReference)i.Operand).Name == "OnDisconnect");
