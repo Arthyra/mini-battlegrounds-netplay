@@ -46,8 +46,8 @@ Record operator/machine, build hashes, battle ID and both player IDs, fault dire
 
 ## Open engineering gates
 
-- Instrumented candidate is being smoke-tested; it is not yet a final acceptance build.
-- Actual synchronous Connect duration across normal/refused/unreachable/blackhole/server-down cases remains to be measured. Background connect change is not implemented.
+- Candidate 0.11.1.3 has passed local two-Unity-client lobby/map-102 smoke. Physical/ECS acceptance remains pending.
+- Async Socket.BeginConnect, main-thread socket adoption and queued join sends are implemented. Normal local connection completed in 26/27 ms including frame scheduling. Refusal/deadline/cancellation helper tests pass. Real unreachable/blackhole/server-down frame measurements remain pending.
 - Firewall script syntax checked; elevated application and watchdog cleanup still require actual execution.
 - Full old-version update, interrupted download, locked-file installation, rollback and relaunch matrix pending.
-- Certificate renewal execution pending. The timer's presence alone is not PASS.
+- Certificate renewal dry-run succeeded on ECS. Actual next scheduled renewal remains pending.

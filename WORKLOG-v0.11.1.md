@@ -14,6 +14,10 @@
 
 ## Evidence
 
+- Candidate `0.11.1.3` (`bd096dc` source, clean build) has entered lobby and map 102 with two real local Unity processes using async Connect. Normal completion took 26/27 ms including Main.Update scheduling. Actual ping echoes now appear at approximately 2-second intervals. Physical-machine/ECS testing remains NOT RUN.
+- Certificate renewal dry-run PASS: `mbg-v0111-cert-dryrun.service` ran certbot's staging renewal, journal at 2026-11-12 04:07:06 UTC reports all simulated renewals succeeded. Production certificate was not replaced. Next actual scheduled renewal remains pending.
+- Installer lock/rollback tests and async socket helper tests are separate from actual Unity and physical acceptance. No final v0.11.1 release created.
+
 - P1 updater failure reproduced with the real pre-fix updater and a Windows FileShare.None lock: first file was overwritten before a later locked target failed (`locked-before.txt`). New installer preflights target occupancy, replaces files atomically with rollback copies, and restores prior files on failure. Seven compiled installer tests PASS, including occupied-file rejection, injected partial-install rollback, success and preserved unrelated Zone.Identifier (`installer-after.txt`). Whole-version upgrade/relaunch matrix still pending.
 - Candidate async battle Connect now initiates only Socket.BeginConnect outside the Unity frame; Main.Update polls completion, adopts socket and starts the original receive loop. Join Send is queued until adoption. Per-attempt identity prevents stale Close cancelling a newer attempt. No Unity object is accessed by a background connect worker. Nine compiled socket/helper tests PASS (`battle-connect-tests.txt`), including refusal, deadline and replacement cancellation. This is NOT a real firewall blackhole PASS.
 - Moved stale battle-disconnect identity guard ahead of clearing the shared heartbeat-active flag, preventing an obsolete proxy callback disabling the new proxy's heartbeat.
