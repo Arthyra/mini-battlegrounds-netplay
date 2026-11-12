@@ -52,6 +52,9 @@ BATTLE_LOAD_TIMEOUT = 90.0
 ROUND_TIME = float(os.environ.get("MBG_ROUND_TIME", "300"))
 ROUND_END_DELAY = float(os.environ.get("MBG_ROUND_END_DELAY", "8"))
 RECONNECT_GRACE = 30.0
+# The client pings every 2s (message 1) on the battle socket; 15s of total
+# silence means the peer is gone even without a FIN/RST (blackhole link).
+BATTLE_SILENCE_TIMEOUT = 15.0
 WORLD_ID = 1
 LAN_VERSION = "lan-v4"
 MAP_ID = 102
@@ -1042,7 +1045,12 @@ class Match(asyncio.DatagramProtocol):
                 if member.battle is not None and not member.battle.is_closing():
                     member.battle.write(snapshot)
         while self.battle_id == battle_id and player.battle is writer:
-            message, payload = await receive(reader)
+            try:
+                message, payload = await asyncio.wait_for(
+                    receive(reader), timeout=BATTLE_SILENCE_TIMEOUT)
+            except asyncio.TimeoutError:
+                print(f"battle silent for {BATTLE_SILENCE_TIMEOUT:.0f}s; closing player {player.id}", flush=True)
+                return
             if self.battle_id != battle_id or player.battle is not writer:
                 return
             if message == 1:

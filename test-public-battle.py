@@ -104,32 +104,64 @@ def recv_until(sock, wanted, timeout=10):
     raise TimeoutError(wanted)
 
 
-def ensure_ready(sock, player_id, attempts=10):
-    # The server keeps room_ready on the persistent player object and only
-    # broadcasts ROOM_STATE after a toggle, so toggle first and read the
-    # resulting state; converge in at most two flips.
+def keepalive(sock, interval=2.0):
+    # Mirror the Unity client's 2s battle ping so the server's silence
+    # detector never fires during a healthy test.
+    import threading
+
+    def loop():
+        try:
+            while True:
+                time.sleep(interval)
+                sock.sendall(frame(1, struct.pack("<f", time.time())))
+        except Exception:
+            pass
+
+    thread = threading.Thread(target=loop, daemon=True)
+    thread.start()
+    return thread
+
+
+def read_room_state(sock):
+    while True:
+        msg, data = recv_msg(sock)
+        if msg == 210:
+            break
+    count = data[1]
+    offset = 8  # BBB??? then the inner <H member count
+    ready = {}
+    for _ in range(count):
+        pid, room_ready, is_owner, nlen = struct.unpack_from("<IBBH", data, offset)
+        offset += 8 + 34  # name is fixed-width utf-16le padded to 34
+        ready[pid] = bool(room_ready)
+    return ready
+
+
+def ensure_both_ready(a, a_id, b, b_id, attempts=8):
+    # Read one room-wide snapshot from a's socket; toggle whichever side is
+    # missing. Never start until both are confirmed ready, otherwise the
+    # round starts with a subset and the room refuses further toggles.
     for _ in range(attempts):
-        sock.sendall(frame(27, struct.pack("<H", 4)))
-        while True:
-            msg, data = recv_msg(sock)
-            if msg == 210:
-                break
-        count = data[1]
-        offset = 8  # BBB??? then the inner <H member count
-        mine = None
-        for _ in range(count):
-            pid, room_ready, is_owner, nlen = struct.unpack_from("<IBBH", data, offset)
-            offset += 8 + 34  # name is fixed-width utf-16le padded to 34
-            if pid == player_id:
-                mine = room_ready
-        if mine:
-            return
-        time.sleep(0.3)
+        a.sendall(frame(27, struct.pack("<H", 4)))
+        ready = read_room_state(a)
+        a_ready = ready.get(a_id, False)
+        b_ready = ready.get(b_id, False)
+        if a_ready and b_ready:
+            return True
+        # undo the a toggle when b is not ready yet, then toggle b
+        if a_ready:
+            a.sendall(frame(27, struct.pack("<H", 4)))
+            read_room_state(a)
+        b.sendall(frame(27, struct.pack("<H", 4)))
+        read_room_state(b)
+        time.sleep(0.2)
+    return False
 
 
 def main():
     a = b = None
-    for attempt in range(15):
+    login_error = None
+    for attempt in range(30):
         try:
             a, a_id = login("slot-1" + VERSION)
             b, b_id = login("pc-test" + VERSION)
@@ -151,13 +183,14 @@ def main():
     a_battle = b_battle = None
     battle_id = udp_port = battle_host = battle_port = None
     for attempt in range(4):
-        ensure_ready(a, a_id)
-        ensure_ready(b, b_id)
+        assert ensure_both_ready(a, a_id, b, b_id), "both players never became ready"
         time.sleep(0.3)
         start(a)
         try:
             a_battle, battle_id, udp_port, battle_host, battle_port = connect_battle(a, a_id)
             b_battle, _, _, _, _ = connect_battle(b, b_id)
+            keepalive(a_battle)
+            keepalive(b_battle)
             break
         except (TimeoutError, socket.timeout, AssertionError, ConnectionError) as start_error:
             print("start retry", attempt, start_error)
@@ -212,6 +245,7 @@ def main():
     msg, data = recv_msg(a2)
     assert msg == 34, (msg, data)
     recv_until(a2, {37}, timeout=5)
+    keepalive(a2)
     print("reconnect 34/37 ok")
 
     # --- regression: a reconnected player re-registers UDP and relays again.
@@ -282,6 +316,7 @@ def main():
     msg, data = recv_msg(a3)
     assert msg == 34, (msg, data)
     recv_until(a3, {37}, timeout=5)
+    keepalive(a3)
     ua.sendto(struct.pack("<HHIHII", 18, 0, battle_id, WORLD_ID, a_id, a_id), (HOST, UDP))
     time.sleep(0.3)
     drain(ub)
