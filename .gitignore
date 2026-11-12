@@ -39,5 +39,6 @@
 !/test-tcp-fin.cs
 !/test-reconnect-state.cs
 !/release-notes-v0.11.1.md
+!/ECS-RELEASE-REPORT-v0.11.1.md
 
 

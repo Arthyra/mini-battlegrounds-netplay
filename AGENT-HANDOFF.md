@@ -1,8 +1,10 @@
-# AGENT HANDOFF — v0.11.0 ECS Stable
+# AGENT HANDOFF — v0.11.1 published
 
-## v0.11.1 acceptance in progress
+## v0.11.1 publication and remaining limits
 
-Read `WORKLOG-v0.11.1.md` and `ECS-ACCEPTANCE-v0.11.1.md` for current unpassed gates. Production remains v0.11.0. The isolated ECS service uses 432xx, its own profile file and admin disabled. Temporary source-IP-restricted cloud rules restored external access; exact rule IDs for later cleanup are in ignored `build/v0.11.1/ecs-test-securitygroup.json`. Physical PC1 recovery exposed a pavement artifact; PC2 lost traffic and stalled at login. Actual-DLL graceful FIN, heartbeat/null-proxy and retry-limit regressions now have before/after evidence. Physical retest is still required. Use the native EXE acceptance/fault helpers; do not change system PowerShell policy.
+User explicitly cancelled remaining physical-PC retesting and authorized formal publication. `lan-player-v0.11.1` is published as **v0.11.1 — ECS 连接恢复修复**, numeric executable/update version **0.11.1.10**. Read `ECS-RELEASE-REPORT-v0.11.1.md` first. All update entry manifests now point to the versioned HTTPS ZIP. Production server.py includes the writer-owned warning cleanup; exact deployed hash and rollback locations are in the report. Isolated service stopped and all 8 temporary cloud rules removed. The original full physical acceptance was NOT completed; unexecuted tests remain unexecuted, not PASS. Pavement artifact/root traffic loss remain follow-ups in issue #7.
+
+Read `WORKLOG-v0.11.1.md` and `ECS-ACCEPTANCE-v0.11.1.md` for historical unpassed gates. Physical PC1 recovery exposed a pavement artifact; PC2 lost traffic and stalled at login. Actual-DLL graceful FIN, heartbeat/null-proxy and retry-limit regressions have before/after evidence. Physical retest was waived by the user for publication, not completed. If testing resumes, use native EXE helpers rather than changing system PowerShell policy. Cloud cleanup evidence is in ignored `build/v0.11.1/ecs-test-securitygroup-cleanup.json`.
 
 Correct patch input on this machine is `C:/Users/Example/.deepseek/mbg-lan-test/Assembly-CSharp-input.dll`. `workcopy/Assembly-CSharp.dll` fails the collision-branch input guard. Do not use it as the unpatched input.
 
@@ -13,7 +15,7 @@ All formal physical-PC, firewall and upgrade gates remain as recorded in the v0.
 给接手继续开发的 Agent。先读本文，再读 `WORKLOG-v0.11.0.md`（进行中状态）、
 `ECS-STABLE-REPORT-v0.11.0.md`（已验收项）、GitHub issue #7（剩余任务）。
 
-## 1. 当前状态（2026-11-12）
+## 1. v0.11.0 historical baseline（2026-11-12）
 
 - 版本 **v0.11.0 — ECS Stable** 已发布：`lan-player-v0.11.0`
 - main HEAD 含全部修复；构建输入 commit 见 `dist/release-v0.11.0.json` 的 `commit` 字段
