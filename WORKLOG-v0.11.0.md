@@ -105,6 +105,18 @@ Goal：完成 ECS 模式开发、稳定性验证、HTTPS 自动更新与可靠�
   （标准端口 + RSA 证书），此后可停用 8445
 - 注意：当前 443 的 /mbg-update 已失效（返回 HTML），启动器自动降级到 8445 ✓
 
+### 更新链路验证矩阵
+| 测试 | 结果 |
+|---|---|
+| 0.10.9 启动器经 8445 拉取+验签 | ✅ launcher-update.log 实证 |
+| 8445 .NET TLS 握手 | ✅ 200 |
+| 篡改清单拒绝 (T3) | ✅ |
+| 损坏 ZIP 拒绝 (T4) | ✅ 3 次重试后拒绝，客户端未动 |
+| v0.10.8 → 0.10.9 实际升级 | ✅ 用户机器完成（界面显示 v0.10.9） |
+| 下载/校验/解压 | ✅ apply ok（MotW 剥离生效） |
+| 独立续期 timer | ✅ 已 enable（每日两次） |
+| 服务端日志轮转 | ✅ /etc/logrotate.d/mini-battleground |
+
 ### 构建一致性
 - 0.10.9 构建输入：`_local-archive/public-client-v0109`（= v0108 底 + 最新补丁 Assembly-CSharp.dll）
 - manifest commit = `d3b94a5`+；dist/update/latest.json 双入口 md5 与本地一致
