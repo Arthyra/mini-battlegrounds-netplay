@@ -109,16 +109,20 @@ def main():
     print(json.dumps(latest, indent=2))
 
     if args.publish:
-        notes = args.notes or ROOT / "docs" / "releases" / f"v{args.version}" / "release-notes.md"
-        if not notes.is_file():
-            parser.error(f"release notes not found: {notes}")
-        subprocess.run([
+        release_cmd = [
             "gh", "release", "create", manifest["tag"], str(archive),
             "--repo", args.repo,
             "--title", args.title or f"v{args.version}",
-            "--notes-file", str(notes),
             "--latest",
-        ], cwd=ROOT, check=True)
+        ]
+        if args.notes:
+            if not args.notes.is_file():
+                parser.error(f"release notes not found: {args.notes}")
+            release_cmd.extend(["--notes-file", str(args.notes)])
+        else:
+            # No repo-stored docs/ required: generate notes from GitHub commit history.
+            release_cmd.append("--generate-notes")
+        subprocess.run(release_cmd, cwd=ROOT, check=True)
 
 
 if __name__ == "__main__":

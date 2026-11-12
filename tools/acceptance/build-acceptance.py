@@ -59,7 +59,15 @@ def main():
         "/out:" + str(install / "ECS-NetworkFault.exe"), "tools/acceptance/ecs-network-fault.cs")
     for name in ("Start-EcsAcceptance.ps1", "Collect-EcsEvidence.ps1", "Invoke-EcsNetworkFault.ps1"):
         shutil.copy2(ROOT / "tools" / "acceptance" / name, install / name)
-    shutil.copy2(ROOT / "docs" / "releases" / "v0.11.1" / "acceptance.md", install / "ECS-ACCEPTANCE-v0.11.1.md")
+    (install / "ACCEPTANCE-README.txt").write_text(
+        "Mini Battlegrounds isolated ECS acceptance package; NOT a stable Release.\n"
+        "Verify package hashes: ECS-Acceptance.exe --verify\n"
+        "Start the test client: ECS-Acceptance.exe or Start-EcsAcceptance.ps1\n"
+        "Collect logs using bundled evidence helpers.\n"
+        "Fault injection requires explicit authorization.\n"
+        "Physical Windows and firewall-blackhole tests are NOT PASS without real observations.\n",
+        encoding="utf-8",
+    )
     files = []
     for name in ("Start Game.exe", "Updater.exe", "client/CrazyShooter_Data/Managed/Assembly-CSharp.dll", "client/CrazyShooter_Data/Managed/LanRoomUI.dll"):
         files.append({"path": name, "sha256": hashlib.sha256((install / name).read_bytes()).hexdigest()})
