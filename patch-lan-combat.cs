@@ -1449,6 +1449,9 @@ internal static class PatchCombat
         tickIl.Emit(OpCodes.Blt, done);
         Trace(tickIl, trace, "tick", 10);
         tickIl.Emit(OpCodes.Ldsfld, attemptsMade);
+        tickIl.Emit(OpCodes.Ldc_I4_S, (sbyte)20);
+        tickIl.Emit(OpCodes.Bge, failed);
+        tickIl.Emit(OpCodes.Ldsfld, attemptsMade);
         tickIl.Emit(OpCodes.Ldc_I4_1);
         tickIl.Emit(OpCodes.Add);
         tickIl.Emit(OpCodes.Stsfld, attemptsMade);
@@ -1486,7 +1489,7 @@ internal static class PatchCombat
         var exitBattle = new VariableDefinition(battleType);
         tick.Body.Variables.Add(exitStage);
         tick.Body.Variables.Add(exitBattle);
-        tickIl.Emit(OpCodes.Call, Method(manager, "get_Instance"));
+        tickIl.Emit(OpCodes.Call, Method(module.GetType("CS.StageManager"), "get_Instance"));
         tickIl.Emit(OpCodes.Callvirt, Method(module.GetType("CS.StageManager"), "GetCurrentStage"));
         tickIl.Emit(OpCodes.Isinst, module.GetType("CS.StageBattle"));
         tickIl.Emit(OpCodes.Stloc, exitStage);
@@ -1705,12 +1708,20 @@ internal static class PatchCombat
         if (joinBattle != null)
         {
             var ji = joinBattle.Body.GetILProcessor();
+            var joinEntry = joinBattle.Body.Instructions[0];
+            ji.InsertBefore(joinEntry, ji.Create(OpCodes.Ldarg_0));
+            ji.InsertBefore(joinEntry, ji.Create(OpCodes.Call, module.ImportReference(
+                Method(uiModule.GetType("EcsBattleConnect"), "JoinReceived", "System.Object"))));
             InsertTrace(ji, joinBattle.Body.Instructions[0], trace, "jb", 30);
             var stageSwitch = joinBattle.Body.Instructions.FirstOrDefault(i =>
                 (i.OpCode == OpCodes.Callvirt || i.OpCode == OpCodes.Call) &&
                 i.Operand is MethodReference && ((MethodReference)i.Operand).Name == "SetCurrentStage");
             if (stageSwitch != null && stageSwitch.Next != null)
+            {
+                ji.InsertBefore(stageSwitch.Next, ji.Create(OpCodes.Ldc_I4_0));
+                ji.InsertBefore(stageSwitch.Next.Next, ji.Create(OpCodes.Stsfld, attemptsMade));
                 InsertTrace(ji, stageSwitch.Next, trace, "jb", 31);
+            }
         }
 
         // Reconnect must be driven by a component that keeps updating after
@@ -1761,9 +1772,11 @@ internal static class PatchCombat
         onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Call, Method(peer, "OnDisconnect")));
         onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Ldc_I4_1));
         onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Stsfld, pending));
-        onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Ldc_I4_0));
-        onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Stsfld, attemptsMade));
-        onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Ldc_R4, 0f));
+        // Preserve the failure count across asynchronous attempts. Reset it
+        // only after a real join response or a fresh lobby login.
+        onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Call, realtime));
+        onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Ldc_R4, 1.5f));
+        onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Add));
         onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Stsfld, retryAt));
         onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Ldstr, "od"));
         onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Ldc_I4, 4));
@@ -1788,6 +1801,8 @@ internal static class PatchCombat
         loginIl.InsertBefore(originalLogin, loginIl.Create(OpCodes.Stsfld, givingUp));
         loginIl.InsertBefore(originalLogin, loginIl.Create(OpCodes.Ldc_I4_0));
         loginIl.InsertBefore(originalLogin, loginIl.Create(OpCodes.Stsfld, pending));
+        loginIl.InsertBefore(originalLogin, loginIl.Create(OpCodes.Ldc_I4_0));
+        loginIl.InsertBefore(originalLogin, loginIl.Create(OpCodes.Stsfld, attemptsMade));
 
         // A world drop during a battle leaves the stage from the receive
         // thread in the original handler, and Unity teardown off the main

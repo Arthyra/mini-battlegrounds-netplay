@@ -37,5 +37,6 @@
 !/ecs-acceptance-runner.cs
 !/ecs-network-fault.cs
 !/test-tcp-fin.cs
+!/test-reconnect-state.cs
 
 

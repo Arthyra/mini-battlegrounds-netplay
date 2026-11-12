@@ -13,6 +13,7 @@ internal class TestPeer
     public Socket Adopted { get { return mSocket; } }
     private void StartReceive() { }
     public void Send(byte[] bytes) { mSocket.Send(bytes); }
+    public void Close() { if(mSocket!=null)mSocket.Close();mSocket=null; }
     public void OnDisconnect() { Disconnects++;CallbackThread=Thread.CurrentThread.ManagedThreadId; }
 }
 internal sealed class NotCompleted : IAsyncResult
@@ -51,6 +52,26 @@ internal static class BattleConnectTests
             watch.Restart();EcsBattleConnect.Pump();Check(watch.ElapsedMilliseconds<50&&EcsBattleConnect.IsPending(stalled),"incomplete handshake leaves frame immediately");
             Thread.Sleep(2100);EcsBattleConnect.Pump();
             Check(stalled.Disconnects==1&&stalled.CallbackThread==Thread.CurrentThread.ManagedThreadId&&!EcsBattleConnect.IsPending(stalled),"deadline reports failure once on caller thread");
+            var silentListener=new TcpListener(IPAddress.Loopback,0);silentListener.Start();
+            var silent=new TestPeer();EcsBattleConnect.Begin(silent,"127.0.0.1",((IPEndPoint)silentListener.LocalEndpoint).Port);
+            using(var accepted=silentListener.AcceptSocket())
+            {
+                Pump(silent);Thread.Sleep(8100);EcsBattleConnect.Pump();EcsBattleConnect.Pump();
+                Check(silent.Disconnects==1&&silent.CallbackThread==Thread.CurrentThread.ManagedThreadId&&silent.Adopted==null,
+                    "TCP accepted without join response times out once on main thread");
+            }
+            var joined=new TestPeer();EcsBattleConnect.Begin(joined,"127.0.0.1",((IPEndPoint)silentListener.LocalEndpoint).Port);
+            using(var accepted=silentListener.AcceptSocket())
+            {
+                Pump(joined);
+                var awaiting=typeof(EcsBattleConnect).GetField("awaitingJoin",BindingFlags.NonPublic|BindingFlags.Static);
+                EcsBattleConnect.JoinReceived(silent);
+                Check(awaiting.GetValue(null)!=null,"stale join response cannot disarm replacement watchdog");
+                EcsBattleConnect.JoinReceived(joined);
+                Check(awaiting.GetValue(null)==null&&joined.Disconnects==0,"current join response disarms timeout without closing connection");
+                joined.Close();
+            }
+            silentListener.Stop();
             listener.Stop();var refused=new TestPeer();EcsBattleConnect.Begin(refused,"127.0.0.1",port);Pump(refused);
             Check(refused.Disconnects==1&&refused.Adopted==null,"refused connection cleans up without adopting socket");
             Console.WriteLine(passed+" passed");return 0;
