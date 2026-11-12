@@ -14,6 +14,12 @@
 
 ## Evidence
 
+- Isolated ECS unit created under `/srv/example/mbg-3`, with separate profiles, admin disabled and 432xx ports. Its TCP endpoints are reachable. Production unit remains active on 431xx. No production disconnect, firewall change or restart performed.
+- Found correct unpatched input at `C:/Users/Example/.deepseek/mbg-lan-test/Assembly-CSharp-input.dll`. The handoff's workcopy DLL fails the patcher's collision-branch guard; it was not used in the candidate.
+- Added opt-in main-frame/Connect timing, UTC+thread IDs, bounded two-file network diagnostics, and a compile-gated acceptance login port override. Release builds must compile without `ECS_ACCEPTANCE`.
+- Candidate CLR IL comparison shows the same Unity internal-call failures and baseline `Battle.RemoveUnit` MissingMethodException as v0.11.0, with no added non-internal-call failures. This is not a Unity runtime PASS; actual candidate launch validation is pending.
+- Added distinct-PC launch/hash verification, evidence collection and temporary firewall scripts, and `ECS-ACCEPTANCE-v0.11.1.md` with explicit NOT RUN rows. All three PowerShell scripts parse successfully. Admin firewall execution remains NOT RUN.
+
 - `4519bff` captures the baseline and deterministic failing regression. `python test-connection-lifecycle.py` reproduced stale A cancelling B's warning (1 FAIL, 1 PASS), saved in `build/v0.11.1/lifecycle-before.txt`.
 - P2 server task-ownership fix scopes warning cancellation to the current writer. Re-run result is recorded with the fix commit. Production is unchanged.
 - `14a89b5` fixes task ownership; `build/v0.11.1/lifecycle-after.txt` records 2 PASS.

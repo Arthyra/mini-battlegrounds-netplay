@@ -24,5 +24,11 @@
 !/WORKLOG-v0.11.1.md
 !/test-connection-lifecycle.py
 !/test-update-policy.cs
+!/ecs-diagnostics.cs
+!/ecs-isolated-server.py
+!/Invoke-EcsNetworkFault.ps1
+!/Start-EcsAcceptance.ps1
+!/Collect-EcsEvidence.ps1
+!/ECS-ACCEPTANCE-v0.11.1.md
 
 

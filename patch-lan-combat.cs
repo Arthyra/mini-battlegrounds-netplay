@@ -867,6 +867,18 @@ internal static class PatchCombat
         var requestIl = request.Body.GetILProcessor();
         requestIl.InsertAfter(loginHost,
             requestIl.Create(OpCodes.Call, module.ImportReference(Method(room, "GetLoginHost", "System.String"))));
+        var diagnostics = ui.GetType("EcsDiagnostics");
+        var loginPort = request.Body.Instructions.Single(i => i.OpCode == OpCodes.Ldc_I4 && (int)i.Operand == 43120);
+        requestIl.InsertAfter(loginPort,
+            requestIl.Create(OpCodes.Call, module.ImportReference(Method(diagnostics, "LoginPort", "System.Int32"))));
+        var managerConnect = Method(module.GetType("CS.ServerProxyManager"), "ConnectToBattleTcpServer", "System.String", "System.Int32");
+        var peerConnect = managerConnect.Body.Instructions.Single(i =>
+            i.OpCode == OpCodes.Callvirt && ((MethodReference)i.Operand).Name == "Connect");
+        peerConnect.OpCode = OpCodes.Call;
+        peerConnect.Operand = module.ImportReference(Method(diagnostics, "Connect", "System.Object", "System.String", "System.Int32"));
+        var mainUpdate = Method(module.GetType("Main"), "Update");
+        mainUpdate.Body.GetILProcessor().InsertBefore(mainUpdate.Body.Instructions[0],
+            mainUpdate.Body.GetILProcessor().Create(OpCodes.Call, module.ImportReference(Method(diagnostics, "Frame"))));
 
         var world = module.GetType("CS.WorldServerProxy");
         var receive = Method(world, "OnReceive", "System.Byte[]");
@@ -1191,7 +1203,7 @@ internal static class PatchCombat
         instructions.InsertBefore(original, instructions.Create(OpCodes.Ret));
     }
 
-    private static void InstallReconnect(ModuleDefinition module)
+    private static void InstallReconnect(ModuleDefinition module, ModuleDefinition uiModule)
     {
         var battleProxy = module.GetType("CS.BattleTcpServerProxy");
         var local = module.GetType("CS.LocalPlayer");
@@ -1210,47 +1222,10 @@ internal static class PatchCombat
         trace.Parameters.Add(new ParameterDefinition("id", ParameterAttributes.None, core.Int32));
         battleProxy.Methods.Add(trace);
         var traceIl = trace.Body.GetILProcessor();
-        var concat2 = module.ImportReference(typeof(string).GetMethod("Concat", new[] { typeof(string), typeof(string) }));
-        var objectToString = module.ImportReference(typeof(object).GetMethod("ToString", Type.EmptyTypes));
-        var tickCount = module.ImportReference(typeof(Environment).GetProperty("TickCount").GetGetMethod());
-        var appendAllText = module.ImportReference(typeof(System.IO.File).GetMethod("AppendAllText", new[] { typeof(string), typeof(string) }));
-        var exceptionType = module.ImportReference(typeof(Exception));
-        // Value types must be boxed before a virtual ToString call: raw
-        // callvirt on a stack value is invalid IL for the Unity Mono JIT.
-        // The whole write is guarded: a trace probe must never break the
-        // game (two clients share the log path and race on it).
-        var tryStart = traceIl.Create(OpCodes.Ldstr, "mbg-reconnect.log");
-        var traceRet = traceIl.Create(OpCodes.Ret);
-        var catchStart = traceIl.Create(OpCodes.Pop);
-        traceIl.Append(tryStart);
-        traceIl.Emit(OpCodes.Call, tickCount);
-        traceIl.Emit(OpCodes.Box, core.Int32);
-        traceIl.Emit(OpCodes.Callvirt, objectToString);
-        traceIl.Emit(OpCodes.Ldstr, " ");
-        traceIl.Emit(OpCodes.Call, concat2);
         traceIl.Emit(OpCodes.Ldarg_0);
-        traceIl.Emit(OpCodes.Call, concat2);
-        traceIl.Emit(OpCodes.Ldstr, " ");
-        traceIl.Emit(OpCodes.Call, concat2);
         traceIl.Emit(OpCodes.Ldarg_1);
-        traceIl.Emit(OpCodes.Box, core.Int32);
-        traceIl.Emit(OpCodes.Callvirt, objectToString);
-        traceIl.Emit(OpCodes.Call, concat2);
-        traceIl.Emit(OpCodes.Ldstr, "\n");
-        traceIl.Emit(OpCodes.Call, concat2);
-        traceIl.Emit(OpCodes.Call, appendAllText);
-        traceIl.Emit(OpCodes.Leave, traceRet);
-        traceIl.Append(catchStart);
-        traceIl.Emit(OpCodes.Leave, traceRet);
-        traceIl.Append(traceRet);
-        trace.Body.ExceptionHandlers.Add(new ExceptionHandler(ExceptionHandlerType.Catch)
-        {
-            CatchType = exceptionType,
-            TryStart = tryStart,
-            TryEnd = catchStart,
-            HandlerStart = catchStart,
-            HandlerEnd = traceRet,
-        });
+        traceIl.Emit(OpCodes.Call, module.ImportReference(Method(uiModule.GetType("EcsDiagnostics"), "Trace", "System.String", "System.Int32")));
+        traceIl.Emit(OpCodes.Ret);
 
         // Operand references lifted from the original OnDisconnect giving-up
         // path so the reconnect tick can exit the same way (StageLogin + 10107).
@@ -2524,7 +2499,7 @@ internal static class PatchCombat
                 Console.WriteLine("step profile"); InstallProfileName(module);
                 Console.WriteLine("step nickname"); InstallNickname(module);
         InstallUnitLeave(module);
-        InstallReconnect(module);
+        InstallReconnect(module, roomUi);
                 Console.WriteLine("step scoreboard"); InstallScoreboard(module);
                 Console.WriteLine("step tips"); InstallHideTips(module);
                 Console.WriteLine("step mountmove"); InstallMountMovement(module);
@@ -2556,6 +2531,7 @@ internal static class PatchCombat
         }
     }
 }
+
 
 
 
