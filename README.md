@@ -6,9 +6,10 @@
 
 ## 版本与进展
 
-- **最新正式版：v0.11.3 — 大厅界面修复**（[Release](https://github.com/Ash-Rise/mini-battlegrounds-lan/releases/tag/lan-player-v0.11.3)）。内部版本为 `0.11.3.0`；战斗中隐藏改名入口，非房主大厅按钮显示“准备／取消准备”。
+- **最新正式版：v0.11.4 — 车辆与投掷调整**（[Release](https://github.com/Ash-Rise/mini-battlegrounds-lan/releases/tag/lan-player-v0.11.4)）。全车前进、倒车最高速度提高 30%；快速点击投掷的准备与出手等待由约 0.90 秒缩至 0.25 秒。ECS 已同步部署，客户端需更新。
+- **大厅界面修复：v0.11.3**（[Release](https://github.com/Ash-Rise/mini-battlegrounds-lan/releases/tag/lan-player-v0.11.3)）。战斗中隐藏改名入口，非房主大厅按钮显示“准备／取消准备”。
 - **启动器热修复：v0.11.2**（[Release](https://github.com/Ash-Rise/mini-battlegrounds-lan/releases/tag/lan-player-v0.11.2)）。保留完整版本号比较，避免更新成功后反复提示同一个版本。
-- **连接恢复修复：v0.11.1**（[Release](https://github.com/Ash-Rise/mini-battlegrounds-lan/releases/tag/lan-player-v0.11.1)）。游戏与服务端逻辑继续沿用此版本。
+- **连接恢复修复：v0.11.1**（[Release](https://github.com/Ash-Rise/mini-battlegrounds-lan/releases/tag/lan-player-v0.11.1)）。后续版本保留这些连接修复。
 - **上一里程碑：v0.11.0 — ECS Stable**（[Release](https://github.com/Ash-Rise/mini-battlegrounds-lan/releases/tag/lan-player-v0.11.0)）。
 
 v0.11.0 完成了战斗断线恢复、重登、UDP 同步与服务端静默检测，并引入签名更新。v0.11.1 进一步修复 TCP 正常关闭后残留连接与登录卡住的问题，将战斗重连的连接等待移出 Unity 主线程，添加入场响应超时和重试限制，修复旧连接误清理新连接任务的竞态；新启动器只通过 HTTPS 获取更新，同时改进更新失败回滚。
