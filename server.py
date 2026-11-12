@@ -55,6 +55,11 @@ RECONNECT_GRACE = 30.0
 # The client pings every 2s (message 1) on the battle socket; 15s of total
 # silence means the peer is gone even without a FIN/RST (blackhole link).
 BATTLE_SILENCE_TIMEOUT = 15.0
+# The lobby/world connection carries the same 2s client ping; total
+# silence means the peer is gone even without a FIN/RST. Without this
+# a silently-dead lobby client pinned its room slot forever, and a
+# dead owner blocked every future room start.
+LOBBY_SILENCE_TIMEOUT = 15.0
 WORLD_ID = 1
 LAN_VERSION = "lan-v4"
 MAP_ID = 102
@@ -846,6 +851,9 @@ class Match(asyncio.DatagramProtocol):
             await self.run_lobby(player, reader, writer)
         finally:
             player.world = None
+            # release_lobby_slot already hands the room to another member
+            # when the departing player was the owner; it just never ran
+            # for silently-dead links before the lobby silence timeout.
             if not self.queued and self.players.get(player.id) is player:
                 self.release_lobby_slot(player)
 
@@ -859,7 +867,12 @@ class Match(asyncio.DatagramProtocol):
         await send(writer, 119)
         self.send_room_state()
         while True:
-            message, payload = await receive(reader)
+            try:
+                message, payload = await asyncio.wait_for(
+                    receive(reader), timeout=LOBBY_SILENCE_TIMEOUT)
+            except asyncio.TimeoutError:
+                print(f"lobby silent for {LOBBY_SILENCE_TIMEOUT:.0f}s; closing player {player.id}", flush=True)
+                return
             if message == 1:
                 await send(writer, message, payload)
             elif message == SKINS_GET and not payload:

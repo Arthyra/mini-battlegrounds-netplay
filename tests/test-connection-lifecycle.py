@@ -20,6 +20,15 @@ class Writer:
     def close(self):
         self.closed = True
 
+    def is_closing(self):
+        return self.closed
+
+    def write(self, payload):
+        self.sent = getattr(self, "sent", []) + [payload]
+
+    async def drain(self):
+        return None
+
     def get_extra_info(self, name):
         return ("127.0.0.1", 1)
 
@@ -71,6 +80,112 @@ class ConnectionLifecycleTests(unittest.IsolatedAsyncioTestCase):
                 new.cancel()
                 await asyncio.gather(warning, new, return_exceptions=True)
 
+    async def test_silent_lobby_times_out_and_owner_transfers(self):
+        # A silently-dead lobby client (no FIN/RST) used to pin its room slot
+        # forever, and if it was the owner every future room start was
+        # blocked. Drive the real Match.world entry: the first receive
+        # returns the world-login frame, then the connection goes silent, so
+        # the lobby loop must time out (LOBBY_SILENCE_TIMEOUT) and ownership
+        # must move to the surviving member.
+        match = server.Match.__new__(server.Match)
+        owner = SimpleNamespace(id=1, world=None, battle=None, udp=None,
+                                room_ready=True, nickname="", character=1,
+                                skins={}, profile_name="slot-1")
+        member = SimpleNamespace(id=2, world=None, battle=None, udp=None,
+                                 room_ready=False, nickname="", character=1,
+                                 skins={}, profile_name="slot-2")
+        match.players = {1: owner, 2: member}
+        match.queued = []
+        match.joined = []
+        match.battle_id = 1
+        match.started = False
+        match.owner = owner
+        match.owner_profile = None
+        match.skin_inventory = b""
+        match.skin_applies = lambda player: b""
+        match.size = 8
+        match.room_state_sent = []
+        match.send_room_state = lambda: match.room_state_sent.append(1)
+        match.save_profile = lambda player: None
+
+        owner.world_ticket = 77
+        owner.profile = lambda now: b""
+        member.world = Writer()
+        dead_writer = Writer()
+
+        async def receive(reader):
+            # first call: the world-login frame; afterwards the link dies
+            # silently (never yields again)
+            if not receive.logged_in:
+                receive.logged_in = True
+                return 23, struct.pack("<II", owner.id, 77)
+            await asyncio.Event().wait()
+        receive.logged_in = False
+
+        real_timeout = server.LOBBY_SILENCE_TIMEOUT
+        server.LOBBY_SILENCE_TIMEOUT = 0.05
+        try:
+            with patch.object(server, "receive", receive):
+                await asyncio.wait_for(match.world(None, dead_writer), timeout=2)
+        finally:
+            server.LOBBY_SILENCE_TIMEOUT = real_timeout
+        await asyncio.sleep(0)
+        # release_lobby_slot ran on the timed-out connection: the dead
+        # owner is removed and ownership moved to the surviving member.
+        self.assertIs(match.owner, member)
+        self.assertNotIn(owner.id, match.players)
+        self.assertIsNone(owner.world)
+        self.assertTrue(match.room_state_sent)
+
+    async def test_lively_lobby_is_not_disconnected(self):
+        # The client pings (message 1) every 2s on the lobby link; the
+        # silence timeout must never fire while pings keep arriving.
+        match = server.Match.__new__(server.Match)
+        owner = SimpleNamespace(id=1, world=None, battle=None, udp=None,
+                                room_ready=True, nickname="", character=1,
+                                skins={}, profile_name="slot-1")
+        match.players = {1: owner}
+        match.queued = []
+        match.joined = []
+        match.battle_id = 1
+        match.started = False
+        match.owner = owner
+        match.owner_profile = None
+        match.skin_inventory = b""
+        match.skin_applies = lambda player: b""
+        match.size = 8
+        match.room_state_sent = []
+        match.send_room_state = lambda: match.room_state_sent.append(1)
+        match.release_lobby_slot = lambda player: None
+        match.save_profile = lambda player: None
+
+        owner.world_ticket = 77
+        owner.profile = lambda now: b""
+        writer = Writer()
+
+        async def receive(reader):
+            if not receive.logged_in:
+                receive.logged_in = True
+                return 23, struct.pack("<II", owner.id, 77)
+            await asyncio.sleep(0.01)  # pings well inside the timeout
+            return 1, struct.pack("<f", 0.0)
+        receive.logged_in = False
+
+        real_timeout = server.LOBBY_SILENCE_TIMEOUT
+        server.LOBBY_SILENCE_TIMEOUT = 0.05
+        try:
+            with patch.object(server, "receive", receive):
+                task = asyncio.create_task(match.world(None, writer))
+                try:
+                    await asyncio.sleep(0.2)  # 4x the timeout, pings keep coming
+                    self.assertFalse(task.done())
+                    self.assertIs(match.owner, owner)
+                finally:
+                    writer.close()
+                    task.cancel()
+                    await asyncio.gather(task, return_exceptions=True)
+        finally:
+            server.LOBBY_SILENCE_TIMEOUT = real_timeout
     async def test_current_writer_cleans_its_udp_warning(self):
         match = server.Match.__new__(server.Match)
         warning = asyncio.create_task(asyncio.Event().wait())
