@@ -32,6 +32,7 @@
 !/tests/test-updater-install.cs
 !/tools/
 /tools/*
+!/tools/ops/
 !/tools/acceptance/
 /tools/acceptance/*
 !/tools/acceptance/build-acceptance.py
