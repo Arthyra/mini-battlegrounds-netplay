@@ -22,7 +22,7 @@
 ## 测试与验收
 
 - 优先复现再修复，为网络生命周期、数据包边界和更新故障补确定性回归。标明观测、推断、假设、未执行测试的区别；一次本机通过不等于真实双机或长期稳定。
-- 使用 `tests/test-public-battle.py`、`tests/test-connection-lifecycle.py` 等适用的现有测试。协议模拟、单机双开、两台物理 PC、真实防火墙黑洞是不同证据等级，分别记录；未执行不得写 PASS。
+- 使用 `tests/test-public-battle.py`、`tests/test-connection-lifecycle.py` 等适用的现有测试。一条命令跑全部单测：`python tests/run-all.py`（加 `--remote` 连 ECS 跑协议回归，需房间空闲）。文件名含连字符，`unittest discover` 无法发现它们，必须用该 runner。协议模拟、单机双开、两台物理 PC、真实防火墙黑洞是不同证据等级，分别记录；未执行不得写 PASS。
 - 联机修改至少验证登录、开局、重复开局、TCP/UDP、断线恢复和主要玩法不回归。涉及客户端时使用与实际发行一致的补丁 DLL 进行 Unity 测试。
 - 修复报告应包含复现条件、改动点、测试命令/证据、未完成项。不要以测试重试掩盖真实产品故障。
 
