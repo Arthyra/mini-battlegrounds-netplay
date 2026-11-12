@@ -198,6 +198,38 @@ internal sealed class LanLauncher : Form
             status.Text = "已取消选择；可重新搜索。";
     }
 
+    private static List<IPEndPoint> DiscoveryEndpoints()
+    {
+        // A global broadcast leaves through one interface only, so machines
+        // with VPNs, WSL or virtual adapters never hear the room. Aim the
+        // request at every uplink IPv4 subnet broadcast address instead.
+        var endpoints = new List<IPEndPoint> { new IPEndPoint(IPAddress.Broadcast, DiscoveryPort) };
+        foreach (var nic in NetworkInterface.GetAllNetworkInterfaces())
+        {
+            if (nic.OperationalStatus != OperationalStatus.Up
+                || nic.NetworkInterfaceType == NetworkInterfaceType.Loopback)
+                continue;
+            foreach (var info in nic.GetIPProperties().UnicastAddresses)
+            {
+                if (info.Address.AddressFamily != AddressFamily.InterNetwork
+                    || info.Address.Equals(IPAddress.Loopback))
+                    continue;
+                var mask = info.IPv4Mask;
+                if (mask == null || mask.Equals(IPAddress.Any))
+                    continue;
+                var ipBytes = info.Address.GetAddressBytes();
+                var maskBytes = mask.GetAddressBytes();
+                var broadcast = new byte[ipBytes.Length];
+                for (var i = 0; i < ipBytes.Length; i++)
+                    broadcast[i] = (byte)(ipBytes[i] | ~maskBytes[i]);
+                var endpoint = new IPEndPoint(new IPAddress(broadcast), DiscoveryPort);
+                if (!endpoints.Contains(endpoint))
+                    endpoints.Add(endpoint);
+            }
+        }
+        return endpoints;
+    }
+
     private static SortedSet<string> FindRooms()
     {
         var rooms = new SortedSet<string>();
@@ -207,7 +239,8 @@ internal sealed class LanLauncher : Form
             {
                 udp.EnableBroadcast = true;
                 var request = Encoding.ASCII.GetBytes("MBG-LAN-DISCOVER-1");
-                udp.Send(request, request.Length, new IPEndPoint(IPAddress.Broadcast, DiscoveryPort));
+                foreach (var endpoint in DiscoveryEndpoints())
+                    udp.Send(request, request.Length, endpoint);
                 var elapsed = Stopwatch.StartNew();
                 while (elapsed.ElapsedMilliseconds < 1100)
                 {
