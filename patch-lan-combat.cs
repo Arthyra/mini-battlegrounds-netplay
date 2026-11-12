@@ -1530,6 +1530,25 @@ internal static class PatchCombat
         var basePeer = module.GetType("CS.TcpPeer");
         if (basePeer != null)
         {
+            // Receive == 0 means graceful EOF. The original loop polls and
+            // receives zero forever, leaving login/world sockets in CLOSE_WAIT.
+            // Close only the socket here; Update drains the final buffered frame
+            // before invoking the existing main-thread disconnect callback.
+            var receiveLoop = Method(basePeer, "StartReceive");
+            var received = receiveLoop.Body.Instructions.Single(i =>
+                i.OpCode == OpCodes.Callvirt && i.Operand is MethodReference &&
+                ((MethodReference)i.Operand).Name == "Receive");
+            var eofBranch = receiveLoop.Body.Instructions.SkipWhile(i => i != received)
+                .First(i => i.OpCode == OpCodes.Ble || i.OpCode == OpCodes.Ble_S);
+            var positiveRead = eofBranch.Next;
+            eofBranch.OpCode = OpCodes.Bgt;
+            eofBranch.Operand = positiveRead;
+            var receiveIl = receiveLoop.Body.GetILProcessor();
+            receiveIl.InsertBefore(positiveRead, receiveIl.Create(OpCodes.Ldarg_0));
+            receiveIl.InsertBefore(positiveRead, receiveIl.Create(OpCodes.Call, Method(basePeer, "Close")));
+            receiveIl.InsertBefore(positiveRead, receiveIl.Create(OpCodes.Leave,
+                receiveLoop.Body.Instructions.Last(i => i.OpCode == OpCodes.Ret)));
+
             foreach (var name in new[] { "StartReceive", "DispatchRecvBuffer" })
             {
                 var m = basePeer.Methods.FirstOrDefault(x => x.Name == name && x.Parameters.Count == 0);
@@ -1636,6 +1655,9 @@ internal static class PatchCombat
         battleProxy.Methods.Add(heartbeat);
         var hi = heartbeat.Body.GetILProcessor();
         var hbDone = hi.Create(OpCodes.Ret);
+        var heartbeatPeer = new VariableDefinition(battleProxy);
+        heartbeat.Body.Variables.Add(heartbeatPeer);
+        heartbeat.Body.InitLocals = true;
         hi.Emit(OpCodes.Ldsfld, tcpActive);
         hi.Emit(OpCodes.Brfalse, hbDone);
         hi.Emit(OpCodes.Call, realtime);
@@ -1648,6 +1670,10 @@ internal static class PatchCombat
         Trace(hi, trace, "hb", 20);
         hi.Emit(OpCodes.Call, Method(manager, "get_Instance"));
         hi.Emit(OpCodes.Callvirt, Method(manager, "GetBattleTcpServerProxy"));
+        hi.Emit(OpCodes.Stloc, heartbeatPeer);
+        hi.Emit(OpCodes.Ldloc, heartbeatPeer);
+        hi.Emit(OpCodes.Brfalse, hbDone);
+        hi.Emit(OpCodes.Ldloc, heartbeatPeer);
         hi.Emit(OpCodes.Callvirt, Method(battleProxy, "OnDisconnect"));
         hi.Append(hbDone);
 
