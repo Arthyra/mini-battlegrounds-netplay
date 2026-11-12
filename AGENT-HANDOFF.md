@@ -30,6 +30,10 @@
 - 补丁工具链：`C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe` +
   `C:\Users\Example\.deepseek\workcopy\Mono.Cecil.dll`
 - Windows 下用 **pwsh**（PowerShell 7），不要用 powershell.exe
+- **这些是本机专有、不在 git 里**（新 Agent 必须跑在本机，或先拿到这些资产）：
+  `_local-archive/public-client-v0109/`（约 200MB 客户端）、`client/`、
+  `dist/`、`workcopy/Mono.Cecil.dll`、签名私钥、`ssh midnight` 配置。
+  没有它们就无法构建发布包；仓库只含源码。
 
 ## 3. 构建与测试命令（按序）
 
