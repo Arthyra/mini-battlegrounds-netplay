@@ -16,6 +16,21 @@
 - `server.py` 提供登录/世界/战斗 TCP（43120/43123/43134）、战斗 UDP（43135）；LAN 发现使用 UDP 43122、临时分享 TCP 43121。修复已有模块中的行为，避免另建一套 ECS/LAN 同步栈。
 - Unity 场景、组件和 UI 操作须在主线程完成。网络接收线程只收包、清理连接或投递状态；异步连接回调不得直接切换场景。
 - 重连需要区分连接建立、战斗入场响应、场景恢复和 UDP 重新注册；不要把 Socket Connect 成功视作完整恢复。对旧连接回调、`writer` 和异步任务使用连接身份或代次守卫，防止旧连接清理新连接状态。
+### 客户端构建配方（权威流程）
+
+- 权威配方在 `tools/acceptance/build-acceptance.py`（验收变体，带 `-define:ECS_ACCEPTANCE`）。
+  发布稳定版用同样的步骤但**不加该 define**，且更新文件放版本化子目录。
+- 顺序：① csc `/noconfig /target:library /nostdlib`，引用 `client/.../Managed` 下的
+  `mscorlib/System/System.Core/UnityEngine/UnityEngine.UI`，源文件
+  `lan-room-ui.cs lan-scoreboard.cs ecs-diagnostics.cs ecs-battle-connect.cs` → `LanRoomUI.dll`；
+  ② csc + Mono.Cecil 0.11.6 编译 `patch-lan-combat.cs` → 补丁工具；
+  ③ 补丁工具 + **未打补丁的原始 Assembly-CSharp.dll**（本机 `C:\Users\Example\.deepseek\mbg-lan-test\Assembly-CSharp-input.dll`）+ ① 的 DLL → 新 `Assembly-CSharp.dll`。
+- 验证：`ilcheck`（预期仅 `CS.Battle::RemoveUnit` 基线噪声）；标识符标记
+  （UI 内 `GetLoginHost/EcsDiagnostics/EcsBattleConnect`，Assembly 内
+  `ReconnectLanBattle/TickLanReconnect/mLanWorldDropPending`；标识符是 ASCII，
+  字符串字面量才是 UTF-16）。**md5 不可用于对比重编译**——csc 非确定性（MVID/堆序）。
+- 每次改动 `patch-lan-combat.cs` / `lan-room-ui.cs` 后必须重建并更新 `client/`，
+  否则会出现“版本号新、DLL 旧”的发布（2026-11-12 审查发现本副本曾整批过时）。
 - 补丁面向旧版 Unity/Mono 运行时。更改 `patch-lan-combat.cs` / `LanRoomUI.dll` 构建链时，检查 IL 栈平衡、运行时 API 可用性、实际 DLL 和 Unity 日志，不能只依赖现代 .NET 编译成功。
 - 测试环境的故障注入开关及端口覆盖只用于隔离测试，正式构建不得启用。
 
