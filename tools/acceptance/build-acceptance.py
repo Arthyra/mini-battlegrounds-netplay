@@ -9,7 +9,7 @@ import shutil
 import subprocess
 import zipfile
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[2]
 
 
 def run(*args):
@@ -54,11 +54,12 @@ def main():
         archive.extractall(install)
     run(csc, "/nologo", "/reference:System.Web.Extensions.dll",
         "/reference:System.IO.Compression.FileSystem.dll", "/reference:System.IO.Compression.dll",
-        "/out:" + str(install / "ECS-Acceptance.exe"), "ecs-acceptance-runner.cs")
+        "/out:" + str(install / "ECS-Acceptance.exe"), "tools/acceptance/ecs-acceptance-runner.cs")
     run(csc, "/nologo", "/reference:Microsoft.CSharp.dll", "/reference:System.Web.Extensions.dll",
-        "/out:" + str(install / "ECS-NetworkFault.exe"), "ecs-network-fault.cs")
-    for name in ("Start-EcsAcceptance.ps1", "Collect-EcsEvidence.ps1", "Invoke-EcsNetworkFault.ps1", "ECS-ACCEPTANCE-v0.11.1.md"):
-        shutil.copy2(ROOT / name, install / name)
+        "/out:" + str(install / "ECS-NetworkFault.exe"), "tools/acceptance/ecs-network-fault.cs")
+    for name in ("Start-EcsAcceptance.ps1", "Collect-EcsEvidence.ps1", "Invoke-EcsNetworkFault.ps1"):
+        shutil.copy2(ROOT / "tools" / "acceptance" / name, install / name)
+    shutil.copy2(ROOT / "docs" / "releases" / "v0.11.1" / "acceptance.md", install / "ECS-ACCEPTANCE-v0.11.1.md")
     files = []
     for name in ("Start Game.exe", "Updater.exe", "client/CrazyShooter_Data/Managed/Assembly-CSharp.dll", "client/CrazyShooter_Data/Managed/LanRoomUI.dll"):
         files.append({"path": name, "sha256": hashlib.sha256((install / name).read_bytes()).hexdigest()})

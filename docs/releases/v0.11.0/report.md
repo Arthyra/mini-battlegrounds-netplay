@@ -1,3 +1,5 @@
+> **历史报告：v0.11.0。** 发布时的结论和风险只对应当时版本；不可用来证明 v0.11.1 及之后的全部测试已通过。
+
 # v0.11.0 — ECS Stable 最终验收报告
 
 日期：2026-11-12
@@ -28,16 +30,16 @@ Goal 第 10 节的验收标准已全部满足，v0.11.0 已发布。以下为逐
 | RSA 签名与 SHA256 校验 | ✅ | 篡改清单拒绝、损坏 ZIP 三次重试后拒绝、正常包校验通过 |
 | 旧客户端平滑升级 | ✅ | v0.10.8 旧启动器经旧 HTTP 入口验签升级到新版本（用户机器实证） |
 | ECS 可靠部署与回滚 | ✅ | systemd 管理、server.py 备份、nginx 配置备份与自动回滚、更新文件双目录 |
-| 主要回归测试可重复执行 | ✅ | `test-public-battle.py`（自愈、含 keepalive）+ `MBG_TEST_DROP_BATTLE` 等钩子 |
+| 主要回归测试可重复执行 | ✅ | `tests/test-public-battle.py`（自愈、含 keepalive）+ `MBG_TEST_DROP_BATTLE` 等钩子 |
 | 密钥与管理接口无新增暴露 | ✅ | 签名私钥仅本地；管理 API 未代理到 443；更新目录只读静态 |
 
 ## 4. 交付验收
 
 - 所有有效修改已提交并推送（本轮 20+ commits，见 git log）
 - 版本与源码 commit 一致（manifest commit 字段 = `f838640`）
-- Release Notes 准确（`release-notes-v0.11.0.md`）
+- Release Notes 准确（`release-notes.md`）
 - Issue #7 状态已同步
-- 测试记录与风险见 `WORKLOG-v0.11.0.md` 与 issue #7
+- 已删除的阶段 Worklog 可从 Git 历史查阅；未完成事项以 Issue #7 为准
 
 ## 5. 已知限制（未完成项，明确列出）
 

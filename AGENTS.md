@@ -5,9 +5,9 @@
 ## 项目与入口
 
 - 本项目为 Mini Battlegrounds / Unity 5.6 Windows 客户端的地图 102 联机原型。ECS 与 LAN 共用 `server.py` 中的登录、房间、战斗和状态同步协议。
-- 先读 `README.md`，再看当前开放的 GitHub Issues 与最新 `WORKLOG-v*.md` / `ECS-ACCEPTANCE-v*.md`。历史验收报告只代表当时状态，不能代替当前验证。
+- 先读 `README.md` 与当前开放的 GitHub Issues；需要调试特定版本时，再按需查 `docs/releases/` 和 `docs/history/`。归档 Worklog 不是长期指令，历史验收报告也不能替代当前验证。
 - 开始修改前检查分支、`git status`、`git diff` 和近期提交；保护未提交的本地改动。
-- `.gitignore` 使用根目录白名单（先忽略 `/*`）。新增源码、文档或测试时必须显式加入例外并核对 `git status`，避免本地构建与仓库内容不一致。
+- `.gitignore` 使用目录及文件白名单（先忽略 `/*`）。新增源码、文档或测试时必须显式加入例外并核对 `git status`，避免本地构建与仓库内容不一致。
 
 ## 架构和正确性
 
@@ -20,7 +20,7 @@
 ## 测试与验收
 
 - 优先复现再修复；为网络生命周期、数据包边界及更新故障补充确定性回归测试。
-- 使用 `test-public-battle.py`、`test-connection-lifecycle.py` 等适用的现有测试。协议模拟、单机双开、两台物理 PC、真实防火墙黑洞是不同证据等级，分别记录；未执行不得写 PASS。
+- 使用 `tests/test-public-battle.py`、`tests/test-connection-lifecycle.py` 等适用的现有测试。协议模拟、单机双开、两台物理 PC、真实防火墙黑洞是不同证据等级，分别记录；未执行不得写 PASS。
 - 联机修改至少验证登录、开局、重复开局、TCP/UDP、断线恢复和主要玩法不回归。涉及客户端时使用与实际发行一致的补丁 DLL 进行 Unity 测试。
 - 修复报告应包含复现条件、改动点、测试命令/证据、未完成项。不要以测试重试掩盖真实产品故障。
 

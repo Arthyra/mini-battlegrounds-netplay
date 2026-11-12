@@ -109,7 +109,7 @@ def main():
     print(json.dumps(latest, indent=2))
 
     if args.publish:
-        notes = args.notes or ROOT / f"release-notes-v{args.version}.md"
+        notes = args.notes or ROOT / "docs" / "releases" / f"v{args.version}" / "release-notes.md"
         if not notes.is_file():
             parser.error(f"release notes not found: {notes}")
         subprocess.run([
