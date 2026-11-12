@@ -1,8 +1,10 @@
+> 历史开发会话日志：仅供追踪 v0.11.1 排障过程。其路径、命令及结论可能已过时，当前约定请参考仓库根目录 AGENTS.md、README.md 与开放 Issue。
+
 # v0.11.1 ECS stability acceptance
 
 ## 2026-11-12 — Baseline and execution scope
 
-- Stage 1 in progress. Read `AGENT-HANDOFF.md` in full.
+- [Historical initial instruction, superseded] Stage 1 originally referenced `AGENT-HANDOFF.md`; current entry is root `AGENTS.md` and active Issue.
 - Initial worktree clean. Local main `f80ab02`, including handoff commits after `439f935`.
 - GitHub latest release `lan-player-v0.11.0`; issue #7 OPEN.
 - ECS `ssh midnight` reachable; production `mini-battleground.service` active with TCP 43120/43123/43134 and UDP 43135. No disruptive production tests authorized or performed.
