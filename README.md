@@ -71,14 +71,14 @@ LAN 游戏的数据平面不应依赖 ECS；但启动器的公网自动更新检
 | `build-friend-zip.py`、`build-release.py` | 从已准备的客户端生成分发包、签名更新清单 |
 | `tests/` | 协议、连接生命周期与更新器回归测试 |
 | `tools/acceptance/` | 隔离 ECS 双机验收构建、故障注入与证据采集 |
-| `docs/releases/`、`docs/history/` | 版本说明、验收报告与归档记录 |
+| [GitHub Releases](https://github.com/Ash-Rise/mini-battlegrounds-lan/releases) | 发布记录、更新说明与玩家下载 |
 | `AGENTS.md` | Agent 开发约定 |
 
 `build-release.py` 需要本地、未提交的合法构建输入，以及与启动器内置公钥配对的签名私钥。发行清单及 ZIP 的地址应按部署环境配置，不能将个人 ECS 地址或密钥硬编码进公共版本。源码提交成功不等于 Windows DLL 已重新构建、测试或发布。
 
-## 测试与文档
+## 测试与版本记录
 
-当前未解决的问题以 [Issue #7](https://github.com/Ash-Rise/mini-battlegrounds-lan/issues/7) 为准。v0.11.1 的测试、发布证据见 [`docs/releases/v0.11.1/`](docs/releases/v0.11.1/)，详细会话日志归档于 [`docs/history/`](docs/history/)；v0.11.0 的历史报告见 [`docs/releases/v0.11.0/`](docs/releases/v0.11.0/)。归档文档不代表当前版本已经通过相同测试。旧 Worklog 已从工作树清除，其历史可通过 Git 查阅。
+已解决的改动见 [GitHub Releases](https://github.com/Ash-Rise/mini-battlegrounds-lan/releases) 与 Git Commit；当前未解决问题见 [Issue #7](https://github.com/Ash-Rise/mini-battlegrounds-lan/issues/7)。自动回归在 `tests/`，隔离验收工具在 `tools/acceptance/`。阶段 Worklog、原始机器日志和详细历史报告不再提交；旧文件仍可通过私有仓库 Git 历史回溯。没有执行的物理双机与网络故障测试不能标记通过。
 
 ## 公开发布与资源说明
 
