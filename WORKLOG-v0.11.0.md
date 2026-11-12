@@ -117,6 +117,16 @@ Goal：完成 ECS 模式开发、稳定性验证、HTTPS 自动更新与可靠�
 | 独立续期 timer | ✅ 已 enable（每日两次） |
 | 服务端日志轮转 | ✅ /etc/logrotate.d/mini-battleground |
 
+### 安全警告（"无法验证发布者"）根因与修复
+- 触发条件：**Mark-of-the-Web（网络下载标记）+ 未签名 exe**
+- 为什么 0.10 后才出现：0.9 时代经局域网 HTTP 分享（Intranet 区域不标记）；
+  0.10 起走 GitHub/ECS 公网下载，且**自动更新把下载的 ZIP 解压覆盖安装目录 →
+  每个被覆盖的 exe 都带标记** → 每次启动都弹
+- 修复：更新器替换时剥离标记（0.10.9）+ 启动器启动时清除安装目录全部 exe 标记
+  （0.10.10）；效果 = 仅首次浏览器下载后运行弹一次
+- 彻底消除首次弹窗需代码签名证书（OV ~$100+/年，需实名）——待用户决策
+- 已发布 v0.10.10
+
 ### 构建一致性
 - 0.10.9 构建输入：`_local-archive/public-client-v0109`（= v0108 底 + 最新补丁 Assembly-CSharp.dll）
 - manifest commit = `d3b94a5`+；dist/update/latest.json 双入口 md5 与本地一致
