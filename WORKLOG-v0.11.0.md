@@ -95,6 +95,16 @@ Goal：完成 ECS 模式开发、稳定性验证、HTTPS 自动更新与可靠�
 - 未完成：**客户端侧黑障心跳**（8s 无数据 → OnDisconnect）未用真实客户端在
   防火墙级黑洞下实测；逻辑审查通过、本机无法构造真实黑洞链路
 
+### qq-agent 解耦（用户计划删除 qq-agent）
+- 新增独立 nginx 配置 `/etc/nginx/sites-enabled/mbg-update`（8445 RSA + /mbg-update/）
+- 从 qq-agent 配置中移除我加的两个块（443 location + 8445 server），qq-agent 文件干净可删
+- 80 端口 ACME challenge 由独立文件 `acme-challenge` 提供，续期不受影响
+- **独立续期**：`mbg-update-cert-renew.{service,timer}`（每日 01/13 点，certbot renew
+  --cert-name mbg-update-rsa + nginx reload），已 enable
+- 已备 `/srv/example/mbg-1`：删 qq-agent 后执行即把更新目录迁到 443
+  （标准端口 + RSA 证书），此后可停用 8445
+- 注意：当前 443 的 /mbg-update 已失效（返回 HTML），启动器自动降级到 8445 ✓
+
 ### 构建一致性
 - 0.10.9 构建输入：`_local-archive/public-client-v0109`（= v0108 底 + 最新补丁 Assembly-CSharp.dll）
 - manifest commit = `d3b94a5`+；dist/update/latest.json 双入口 md5 与本地一致
