@@ -52,6 +52,11 @@ def main():
     install = output / "package"
     with zipfile.ZipFile(base) as archive:
         archive.extractall(install)
+    run(csc, "/nologo", "/reference:System.Web.Extensions.dll",
+        "/reference:System.IO.Compression.FileSystem.dll", "/reference:System.IO.Compression.dll",
+        "/out:" + str(install / "ECS-Acceptance.exe"), "ecs-acceptance-runner.cs")
+    run(csc, "/nologo", "/reference:Microsoft.CSharp.dll", "/reference:System.Web.Extensions.dll",
+        "/out:" + str(install / "ECS-NetworkFault.exe"), "ecs-network-fault.cs")
     for name in ("Start-EcsAcceptance.ps1", "Collect-EcsEvidence.ps1", "Invoke-EcsNetworkFault.ps1", "ECS-ACCEPTANCE-v0.11.1.md"):
         shutil.copy2(ROOT / name, install / name)
     files = []

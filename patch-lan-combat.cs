@@ -1457,6 +1457,10 @@ internal static class PatchCombat
         tickIl.Emit(OpCodes.Stsfld, attemptsMade);
         tickIl.Emit(OpCodes.Ldc_I4_1);
         tickIl.Emit(OpCodes.Stsfld, inProgress);
+        tickIl.Emit(OpCodes.Call, realtime);
+        tickIl.Emit(OpCodes.Ldc_R4, 1.5f);
+        tickIl.Emit(OpCodes.Add);
+        tickIl.Emit(OpCodes.Stsfld, retryAt);
         tickIl.Emit(OpCodes.Call, Method(manager, "get_Instance"));
         tickIl.Emit(OpCodes.Callvirt, Method(manager, "GetBattleTcpServerProxy"));
         tickIl.Emit(OpCodes.Callvirt, reconnect);
@@ -1774,10 +1778,8 @@ internal static class PatchCombat
         onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Stsfld, pending));
         // Preserve the failure count across asynchronous attempts. Reset it
         // only after a real join response or a fresh lobby login.
-        onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Call, realtime));
-        onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Ldc_R4, 1.5f));
-        onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Add));
-        onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Stsfld, retryAt));
+        // The main-thread tick owns retry timing. Receive-thread callbacks must
+        // not read UnityEngine.Time or touch a newer attempt's deadline.
         onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Ldstr, "od"));
         onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Ldc_I4, 4));
         onDisconnect.InsertBefore(first, onDisconnect.Create(OpCodes.Call, trace));

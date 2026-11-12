@@ -2,7 +2,7 @@
 
 ## v0.11.1 acceptance in progress
 
-Read `WORKLOG-v0.11.1.md` and `ECS-ACCEPTANCE-v0.11.1.md` for current unpassed gates. Production remains v0.11.0. The isolated ECS service uses 432xx, its own profile file and admin disabled. External 432xx access still needs diagnosis before physical testing.
+Read `WORKLOG-v0.11.1.md` and `ECS-ACCEPTANCE-v0.11.1.md` for current unpassed gates. Production remains v0.11.0. The isolated ECS service uses 432xx, its own profile file and admin disabled. Temporary source-IP-restricted cloud rules restored external access; exact rule IDs for later cleanup are in ignored `build/v0.11.1/ecs-test-securitygroup.json`. Physical PC1 recovery exposed a pavement artifact; PC2 lost traffic and stalled at login. Actual-DLL graceful FIN, heartbeat/null-proxy and retry-limit regressions now have before/after evidence. Physical retest is still required. Use the native EXE acceptance/fault helpers; do not change system PowerShell policy.
 
 Correct patch input on this machine is `C:/Users/Example/.deepseek/mbg-lan-test/Assembly-CSharp-input.dll`. `workcopy/Assembly-CSharp.dll` fails the collision-branch input guard. Do not use it as the unpatched input.
 
