@@ -14,6 +14,11 @@
 
 ## Evidence
 
+- User selected manual two-PC execution and log return, then authorized use of their configured Alibaba Cloud CLI. Read-only CLI found the midnight instance security group allowed only the production ports (not all inbound ports). Added four temporary acceptance rules limited to the current SSH source IPv4 /32. Exact rules/responses are in ignored `build/v0.11.1/ecs-test-securitygroup.json` for removal after acceptance. Public test login now returns message 20. Production rules unchanged.
+- On-host isolated ECS protocol regression PASS (`ecs-isolated-protocol.txt`): login, start, UDP forwarding, battle reconnect, UDP re-registration, mounted status and scoped/mounted cleanup. This is protocol simulation, not physical-client acceptance.
+- Candidate 0.11.1.3 local two-Unity idle observation: >110 seconds each, 55 ping echoes each with median 2.008s intervals, no disconnects. `idle-local.json` is LOCAL ONLY.
+- Second physical PC screenshot showed PSSecurityException before the startup script ran. Added a native .NET EXE startup/collection helper, preserving system execution policy and the exact tested game DLLs. Helper `--verify` PASS. Delivered a small supplemental ZIP; second PC should run `ECS-Acceptance.exe pc2`. Physical gameplay/fault tests still NOT RUN.
+
 - Candidate `0.11.1.3` (`bd096dc` source, clean build) has entered lobby and map 102 with two real local Unity processes using async Connect. Normal completion took 26/27 ms including Main.Update scheduling. Actual ping echoes now appear at approximately 2-second intervals. Physical-machine/ECS testing remains NOT RUN.
 - Certificate renewal dry-run PASS: `mbg-v0111-cert-dryrun.service` ran certbot's staging renewal, journal at 2026-11-12 04:07:06 UTC reports all simulated renewals succeeded. Production certificate was not replaced. Next actual scheduled renewal remains pending.
 - Installer lock/rollback tests and async socket helper tests are separate from actual Unity and physical acceptance. No final v0.11.1 release created.

@@ -34,5 +34,6 @@
 !/ecs-battle-connect.cs
 !/test-updater-install.cs
 !/test-battle-connect.cs
+!/ecs-acceptance-runner.cs
 
 
