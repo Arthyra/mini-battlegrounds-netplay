@@ -6,7 +6,8 @@
 
 ## 版本与进展
 
-- **最新正式版：v0.11.1 — ECS 连接恢复修复**（[Release](https://github.com/Ash-Rise/mini-battlegrounds-lan/releases/tag/lan-player-v0.11.1)）。启动器内部版本为 `0.11.1.10`。
+- **最新正式版：v0.11.2 — 修复重复更新提示**（[Release](https://github.com/Ash-Rise/mini-battlegrounds-lan/releases/tag/lan-player-v0.11.2)）。启动器内部版本为 `0.11.2.0`；保留完整版本号比较，避免更新成功后反复提示同一个版本。
+- **连接恢复修复：v0.11.1**（[Release](https://github.com/Ash-Rise/mini-battlegrounds-lan/releases/tag/lan-player-v0.11.1)）。游戏与服务端逻辑继续沿用此版本。
 - **上一里程碑：v0.11.0 — ECS Stable**（[Release](https://github.com/Ash-Rise/mini-battlegrounds-lan/releases/tag/lan-player-v0.11.0)）。
 
 v0.11.0 完成了战斗断线恢复、重登、UDP 同步与服务端静默检测，并引入签名更新。v0.11.1 进一步修复 TCP 正常关闭后残留连接与登录卡住的问题，将战斗重连的连接等待移出 Unity 主线程，添加入场响应超时和重试限制，修复旧连接误清理新连接任务的竞态；新启动器只通过 HTTPS 获取更新，同时改进更新失败回滚。
@@ -27,6 +28,7 @@ v0.11.0 完成了战斗断线恢复、重登、UDP 同步与服务端静默检�
 在获得授权的私有测试环境中，从对应 [Release](https://github.com/Ash-Rise/mini-battlegrounds-lan/releases) 下载适用的 Windows 包，**完整解压**后运行 `Start Game.exe`。
 
 - **ECS / 公网**：通过启动器连接已授权的云端房间，或手动指定可访问的服务器 IPv4。
+- 当前房间不支持在进行中的对局里新登录。若已有玩家开局，新玩家需等待这局结束；客户端会重试。此时停留登录页不代表服务器已停止，人数未到上限也不代表允许中途加入。
 - **LAN / 局域网**：房主在 Windows 启动器选择“创建局域网房间”；其他玩家选择“搜索局域网房间”或手动填写房主 IPv4。
 - 创建房间需要安装包包含 `server/server.exe`。部分仅供加入的客户端包可能不含服务端；这种包不能开房。
 
