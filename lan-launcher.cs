@@ -308,7 +308,17 @@ internal sealed class LanLauncher : Form
         public string Signature;
     }
 
-    private const string UpdateUrl = "https://198.51.100.10/mbg-update/latest.json";
+    // Tried in order. The RSA endpoint (ISRG Root X1) works on older .NET
+    // and Windows builds where the ECDSA/ISRG Root YE chain is untrusted;
+    // the legacy HTTP entry stays as the final compatibility fallback - the
+    // RSA manifest signature is enforced on every entry, so authenticity
+    // never depends on the transport.
+    private static readonly string[] UpdateUrls =
+    {
+        "https://198.51.100.10:8445/mbg-update/latest.json",
+        "https://198.51.100.10/mbg-update/latest.json",
+        "http://198.51.100.10:8080/update/latest.json",
+    };
     private static bool applyUpdateSilently;
 
     private static void LogUpdate(string message)
@@ -368,7 +378,6 @@ internal sealed class LanLauncher : Form
         UpdateInfo latest;
         try
         {
-            LogUpdate("fetch update manifest from " + UpdateUrl);
             latest = await Task.Run(() => FetchUpdate());
             LogUpdate("manifest fetched: v" + latest.Version + " url=" + latest.Url);
         }
@@ -473,11 +482,30 @@ internal sealed class LanLauncher : Form
 
     private static UpdateInfo FetchUpdate()
     {
+        Exception lastError = null;
+        foreach (var url in UpdateUrls)
+        {
+            try
+            {
+                LogUpdate("fetch update manifest from " + url);
+                return FetchUpdateFrom(url);
+            }
+            catch (Exception error)
+            {
+                LogUpdate("manifest fetch failed at " + url + ": " + error.GetType().Name + " " + error.Message);
+                lastError = error;
+            }
+        }
+        throw lastError ?? new InvalidOperationException("没有可用的更新服务器。");
+    }
+
+    private static UpdateInfo FetchUpdateFrom(string url)
+    {
         using (var client = new WebClient())
         {
             client.Proxy = null;
             client.Encoding = Encoding.UTF8;
-            var json = client.DownloadString(UpdateUrl);
+            var json = client.DownloadString(url);
             var latest = new UpdateInfo
             {
                 Version = JsonValue(json, "version"),
