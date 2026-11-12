@@ -45,6 +45,7 @@
 !/docs/history/
 /docs/history/*
 !/docs/history/WORKLOG-v0.11.1.md
+!/docs/history/WORKLOG-server-hotfix-2026-11-12.md
 !/docs/releases/
 /docs/releases/*
 !/docs/releases/v0.11.0/
@@ -58,6 +59,7 @@
 !/docs/releases/v0.11.1/release-notes.md
 
 !/tests/test-launcher-version.cs
+!/tests/test-room-and-explosion.py
 !/docs/releases/v0.11.2/
 /docs/releases/v0.11.2/*
 !/docs/releases/v0.11.2/release-notes.md

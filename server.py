@@ -1298,7 +1298,7 @@ class Match(asyncio.DatagramProtocol):
     def blast(self, owner, projectile, impact, radius, damage, message, now):
         x, _, z = impact
         for target in self.joined:
-            if target is owner or not self.can_damage(target, now):
+            if not self.can_damage(target, now):
                 continue
             tx, ty, tz = target.status[:3]
             if target.vehicle is not None:
@@ -1348,7 +1348,7 @@ class Match(asyncio.DatagramProtocol):
         self.broadcast(VEHICLE_EXPLODE, struct.pack("<I", vehicle.id))
         _, radius, _, _ = vehicle.spec
         for target in self.joined:
-            if target is shooter or not self.can_damage(target, now):
+            if not self.can_damage(target, now):
                 continue
             tx, ty, tz = target.status[:3]
             if target.vehicle is not None:
@@ -1593,7 +1593,7 @@ class Match(asyncio.DatagramProtocol):
                 and not target.revive_at and now >= target.protected_until)
 
     def apply_damage(self, shooter, target, damage, now):
-        if shooter is target or damage <= 0 or target.revive_at:
+        if damage <= 0 or target.revive_at:
             return
         target.health = max(0.0, target.health - damage)
         print(f"hit: player {shooter.id} -> {target.id}, health {target.health:g}", flush=True)
@@ -1760,6 +1760,15 @@ class Match(asyncio.DatagramProtocol):
         while True:
             await asyncio.sleep(TICK)
             now = time.monotonic()
+            # Keep reconnect grace while any world/battle connection is live,
+            # but do not reserve an empty round after everyone has gone.
+            if self.queued and not any(
+                writer is not None and not writer.is_closing()
+                for player in self.players.values()
+                for writer in (player.world, player.battle)
+            ):
+                self.finish_round("room empty")
+                continue
             if self.owner_profile:
                 if not self.players:
                     if not self.empty_since:
