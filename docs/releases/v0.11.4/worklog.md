@@ -17,3 +17,10 @@
 - Re-launched with an explicit working directory and visible window, activated it and reached the hall/map102 using the clean production patch (no diagnostic injection). Previous stalled observations were not a reproducible patch regression; unchanged DLL had the same symptom. Hidden/background launches are unsuitable for this visual check.
 - Actual quick-click: equipped throwable with4; clicked once; observed grenade in flight and automatic return to primary weapon. Server recorded one kind1 throw and successful TCP entry/load plus UDP registration. Projectile subsequently disappeared; no new exception/InvalidProgram/MissingMethod stack in smoke.log. Screenshot cadence does not establish a measured0.25s visual latency; that bound is verified at server scheduling level only.
 - Only owned local test game/helper stopped. No dual-PC/network acceptance repeated. Formal ECS and update feed remain unchanged pending deployment approval.
+
+## Prepared package
+
+- Source commit eaba4ffc87e23536b4480bd35b4257ae48da0d9d.
+- ZIP SHA25664fc90888a058edca3438196d4440789fa882cadab39a80e60ff4d4012f95075;89,799,105bytes.
+- ZIP Assembly-CSharp.dll and LanRoomUI.dll match the actual Unity smoke inputs; bundled server.exe matches the fresh host build. RSA-signed manifest prepared locally, no live feed switch.
+- ECS connection inspection: no world/battle TCP peers. Asked once for production deployment/release approval, per AGENTS.md. Until approved, formal service/feed/Release remain unchanged.
