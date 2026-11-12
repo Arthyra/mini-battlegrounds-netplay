@@ -47,6 +47,7 @@ def main():
     parser.add_argument("--host", default=DEFAULT_HOST, help="address written to server.txt")
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--notes", type=Path, help="release notes Markdown file")
+    parser.add_argument("--title", help="Release title, defaults to the version number")
     parser.add_argument("--publish", action="store_true", help="create the GitHub release with gh")
     parser.add_argument("--repo", default=DEFAULT_REPO)
     parser.add_argument("--signing-key", type=Path,
@@ -114,7 +115,7 @@ def main():
         subprocess.run([
             "gh", "release", "create", manifest["tag"], str(archive),
             "--repo", args.repo,
-            "--title", f"Windows 玩家包 · 102 复活模式 v{args.version}",
+            "--title", args.title or f"v{args.version}",
             "--notes-file", str(notes),
             "--latest",
         ], cwd=ROOT, check=True)
