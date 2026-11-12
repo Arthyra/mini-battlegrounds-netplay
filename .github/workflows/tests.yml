@@ -1,0 +1,42 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  python-unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Run Python unit tests
+        run: python tests/run-all.py
+
+  windows-compile:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch Mono.Cecil 0.11.6 from NuGet
+        shell: pwsh
+        run: |
+          $url = "https://api.nuget.org/v3-flatcontainer/mono.cecil/0.11.6/mono.cecil.0.11.6.nupkg"
+          Invoke-WebRequest -Uri $url -OutFile mono.cecil.nupkg
+          Expand-Archive -Path mono.cecil.nupkg -DestinationPath cecil-pkg -Force
+          Copy-Item cecil-pkg/lib/net40/Mono.Cecil.dll .
+      - name: Compile patch tool
+        shell: cmd
+        run: C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe -nologo -out:PatchLanCombat.exe -reference:Mono.Cecil.dll patch-lan-combat.cs
+      - name: Compile launcher, updater, fullscreen helper
+        shell: cmd
+        run: |
+          C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe -nologo -target:winexe -reference:System.Windows.Forms.dll -reference:System.Drawing.dll -reference:System.IO.Compression.FileSystem.dll -out:StartGame.exe lan-launcher.cs
+          C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe -nologo -target:winexe -reference:System.Windows.Forms.dll -out:Updater.exe updater.cs
+          C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe -nologo -target:winexe -out:Fullscreen.exe fullscreen-helper.cs
+      - name: Compile and smoke-run the update-policy test
+        shell: cmd
+        run: |
+          C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe -nologo -out:UpdatePolicyTest.exe tests\test-update-policy.cs
+          UpdatePolicyTest.exe StartGame.exe

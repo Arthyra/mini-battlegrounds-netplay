@@ -3,6 +3,7 @@
 !/.gitignore
 !/AGENTS.md
 !/README.md
+!/.github/
 !/admin_server.py
 !/server.py
 !/lan_share.py
