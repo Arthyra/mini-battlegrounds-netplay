@@ -463,8 +463,10 @@ internal sealed class LanLauncher : Form
                 MessageBox.Show("自动更新失败：\n" + error, "Mini Battlegrounds");
             return;
         }
-        if (!applyUpdateSilently)
-            MessageBox.Show("更新程序已启动，启动器将自动重启。", "Mini Battlegrounds");
+        // No modal here: the updater window ("等待旧启动器退出…") is the
+        // progress feedback, and a blocking dialog here deadlocks it until
+        // the user clicks OK. Close immediately so the installer proceeds
+        // and restarts the launcher itself.
         Close();
     }
 
