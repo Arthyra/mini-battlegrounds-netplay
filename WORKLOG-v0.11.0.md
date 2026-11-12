@@ -83,6 +83,18 @@ Goal：完成 ECS 模式开发、稳定性验证、HTTPS 自动更新与可靠�
 - 0.10.9 已发布 GitHub Release（`lan-player-v0.10.9`）
 - 注意：旧版启动器（内嵌单一 443 URL）无法自更新到新证书链，需一次手动替换
 
+### 阶段三补充（存活检测与测试收敛）
+- **服务端静默检测**（`BATTLE_SILENCE_TIMEOUT=15s`）：客户端每 2s ping，
+  15s 无任何战斗消息即判定死亡并断开（黑障链路不再形成僵尸连接），
+  随后进入正常重连宽限。已通过实际日志验证
+  （`battle silent for 15s; closing player 1`）
+- 日志发现的实际问题：**黑障时服务端无检测**（原依赖 TCP 重传超时，分钟级）
+- 协议测试收敛：keepalive 线程（2s ping，匹配真实客户端）、
+  `ensure_both_ready`（一份房间快照确认双人就绪后才开局，避免部分开局
+  锁死 toggle）、登录重试窗口 120s（吸收上一轮宽限期）
+- 未完成：**客户端侧黑障心跳**（8s 无数据 → OnDisconnect）未用真实客户端在
+  防火墙级黑洞下实测；逻辑审查通过、本机无法构造真实黑洞链路
+
 ### 构建一致性
 - 0.10.9 构建输入：`_local-archive/public-client-v0109`（= v0108 底 + 最新补丁 Assembly-CSharp.dll）
 - manifest commit = `d3b94a5`+；dist/update/latest.json 双入口 md5 与本地一致
