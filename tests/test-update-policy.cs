@@ -17,9 +17,9 @@ internal static class UpdatePolicyTests
             if(type == null) type = Array.Find(Assembly.LoadFrom(Path.GetFullPath(args[0])).GetTypes(), t => t.GetMethod("VerifyUpdateManifest", BindingFlags.NonPublic | BindingFlags.Static) != null);
             var urls = (string[])type.GetField("UpdateUrls", BindingFlags.NonPublic | BindingFlags.Static).GetValue(null);
             Check(Array.TrueForAll(urls, u => new Uri(u).Scheme == "https"), "all manifest endpoints HTTPS");
-            var request = (HttpWebRequest)Call("UpdateRequest", "https://198.51.100.10/mbg-update/latest.json");
+            var request = (HttpWebRequest)Call("UpdateRequest", "https://198.51.100.10/mbg-update/latest.json", 30);
             Check(!request.AllowAutoRedirect, "redirects cannot downgrade transport");
-            try { Call("UpdateRequest", "http://127.0.0.1:1/latest.json"); throw new Exception("HTTP accepted"); }
+            try { Call("UpdateRequest", "http://127.0.0.1:1/latest.json", 30); throw new Exception("HTTP accepted"); }
             catch(TargetInvocationException e) { Check(e.InnerException is InvalidDataException, "HTTP rejected before network request"); }
             var info = Call("FetchUpdateFrom", "https://198.51.100.10/mbg-update/latest.json");
             Check((bool)Call("VerifyUpdateManifest", info), "real ECS RSA-SHA256 manifest signature accepted");
