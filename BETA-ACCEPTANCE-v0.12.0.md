@@ -1,7 +1,7 @@
 # v0.12.0 LAN Beta — 候选版本验收结论（不公开发布）
 
 候选包：`dist-beta/Mini-Battlegrounds-LAN-Windows.zip`（owner 版，含服务端）
-commit：`72127a4`；SHA256：`31d63640…`；构建输入：`public-client-v0115` + 当前补丁源码
+commit：`72127a4`；SHA256 只记录了前缀 `31d63640…`（正式双机验收前，须在本地重新计算并记录完整 SHA256）；构建输入：`public-client-v0115` + 当时的补丁源码
 
 ## 已验证（单机证据）
 - 13 单测全绿；CI（Python + Windows 编译检查）绿
@@ -24,4 +24,4 @@ commit：`72127a4`；SHA256：`31d63640…`；构建输入：`public-client-v011
 - 连续重进地图的内存占用未测量（前台占用推迟；多轮重进的正确性已验证）
 - 客户端无"房主已离开"提示（服务端转移所有权后客户端经 ROOM_STATE 感知，
   新房主的开始按钮即生效——功能完整，仅缺 toast）
-- ECS 服务端大厅静默修复已入 main、待 ECS 部署（不涉及 LAN）
+- ECS 服务端大厅静默修复已入 main；正式 ECS 的实际部署版本须另行核对（不涉及 LAN）

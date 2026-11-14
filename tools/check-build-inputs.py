@@ -36,16 +36,18 @@ def main():
     server = ROOT / "dist/server/server.exe"
     source = ROOT / "server.py"
     # PyInstaller compresses the bytecode, so plaintext probes do not work.
-    # Staleness heuristic: the exe must be newer than the server source.
+    # A newer timestamp is only a preflight, not proof of reproducibility.
     fresh = (server.is_file() and source.is_file()
              and server.stat().st_mtime >= source.stat().st_mtime)
-    print(("OK   " if fresh else "STALE") + " dist/server/server.exe (newer than server.py)")
+    print(("CHECK" if fresh else "STALE") + " dist/server/server.exe (mtime heuristic only; smoke-run required)")
     if not fresh:
         missing.append("server.exe rebuild: python -m PyInstaller --noconfirm build/pyinstaller/server.spec, then smoke-run it")
     client = ROOT / "client/CrazyShooter_Data/Managed/Assembly-CSharp.dll"
     lan = client.read_bytes() if client.is_file() else b""
-    print(("OK   " if b"DiscoveryEndpoints" not in lan and len(lan) else "CHECK") +
-          f" client/ Assembly-CSharp.dll ({len(lan)} bytes; rebuild with PatchLanCombat after patch-source changes)")
+    print(("CHECK" if len(lan) else "MISS ") +
+          f" client/ Assembly-CSharp.dll ({len(lan)} bytes; verify patched DLL and Unity runtime separately)")
+    if not lan:
+        missing.append("prepared client/CrazyShooter_Data/Managed/Assembly-CSharp.dll")
     if missing:
         print("\nMISSING INPUTS:")
         for item in missing:

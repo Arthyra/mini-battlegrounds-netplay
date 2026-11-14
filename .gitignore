@@ -18,10 +18,8 @@
 !/updater.cs
 !/fullscreen-helper.cs
 !/prepare_lan_client.py
-!/lan_share.py
 !/build-friend-zip.py
 !/build-release.py
-!/test-public-battle.py
 !/tests/
 /tests/*
 !/tests/run-all.py
@@ -47,6 +45,5 @@
 !/tools/Invoke-EcsNetworkFault.ps1
 !/tools/prune-update-mirror.sh
 !/tools/check-build-inputs.py
-!/release-notes-*.md
 !/ecs-battle-connect.cs
 !/ecs-diagnostics.cs

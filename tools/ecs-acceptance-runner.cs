@@ -60,7 +60,9 @@ internal static class EcsAcceptanceRunner
             File.Copy(Path.Combine(root,"acceptance-build.json"),Path.Combine(evidence,"acceptance-build.json"));
             Record(Path.Combine(evidence,"machine.json"),new { utc=DateTime.UtcNow.ToString("o"),computer=Environment.MachineName,player=player,build=manifest["version"],commit=manifest["commit"],clockStatus=Command("w32tm.exe","/query /status") });
             var client=Path.Combine(root,"client");
-            var arguments="-screen-fullscreen 0 -screen-width 1280 -screen-height 720 -lan-host=198.51.100.10 -lan-profile=v0111-"+player+" -ecs-test-login-port=43220 -ecs-diagnostics=\""+Path.Combine(evidence,"frames-connect.log")+"\" -logFile \""+Path.Combine(evidence,"unity.log")+"\"";
+            var host=manifest.ContainsKey("host") ? (string)manifest["host"] : "";
+            if(String.IsNullOrWhiteSpace(host)) throw new InvalidDataException("Acceptance manifest has no test host.");
+            var arguments="-screen-fullscreen 0 -screen-width 1280 -screen-height 720 -lan-host="+host+" -lan-profile=accept-"+player+" -ecs-test-login-port=43220 -ecs-diagnostics=\""+Path.Combine(evidence,"frames-connect.log")+"\" -logFile \""+Path.Combine(evidence,"unity.log")+"\"";
             Console.CancelKeyPress+=(sender,eventArgs)=>{eventArgs.Cancel=true;interrupted=true;};
             using(var game=Process.Start(new ProcessStartInfo(Path.Combine(client,"CrazyShooter.exe"),arguments){WorkingDirectory=client,UseShellExecute=false}))
             {

@@ -9,7 +9,7 @@ import shutil
 import subprocess
 import zipfile
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def run(*args):
@@ -25,11 +25,19 @@ def main():
     parser.add_argument("--cecil", type=Path,
                         default=Path(os.environ["MBG_MONO_CECIL"]) if os.environ.get("MBG_MONO_CECIL") else None,
                         help="Mono.Cecil 0.11.6; set MBG_MONO_CECIL or pass --cecil")
+    parser.add_argument("--client", type=Path,
+                        default=Path(os.environ["MBG_CLIENT_DIR"]) if os.environ.get("MBG_CLIENT_DIR") else None,
+                        help="Prepared base client (set MBG_CLIENT_DIR or pass --client)")
+    parser.add_argument("--host", default=os.environ.get("MBG_TEST_HOST"),
+                        help="Isolated test host (set MBG_TEST_HOST or pass --host)")
     parser.add_argument("--version", required=True, help="Acceptance package version label")
     args = parser.parse_args()
-    for name in ("input", "cecil"):
-        if getattr(args, name) is None:
-            parser.error(f"--{name} (or its MBG_* env var) is required: machine-local build asset")
+    for name in ("input", "cecil", "client"):
+        path = getattr(args, name)
+        if path is None or not path.exists():
+            parser.error(f"--{name} (or its MBG_* env var) must point to an existing machine-local build input")
+    if not args.host:
+        parser.error("--host or MBG_TEST_HOST is required; never silently target production ECS")
     output = args.output.resolve()
     if output.exists():
         parser.error("Choose a new output directory to retain earlier evidence.")
@@ -37,7 +45,7 @@ def main():
     tools = output / "tools"
     tools.mkdir()
     shutil.copy2(args.cecil, tools / "Mono.Cecil.dll")
-    runtime = ROOT / "client/CrazyShooter_Data/Managed"
+    runtime = args.client / "CrazyShooter_Data" / "Managed"
     csc = Path(os.environ["WINDIR"]) / "Microsoft.NET/Framework64/v4.0.30319/csc.exe"
     run(csc, "/nologo", "/noconfig", "/target:library", "/nostdlib", "/define:ECS_ACCEPTANCE",
         *("/reference:" + str(runtime / name) for name in
@@ -51,11 +59,11 @@ def main():
     friend = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(friend)
     candidate = output / "prepared-client"
-    friend.copy_runtime(candidate, ROOT / "_local-archive/public-client-v0109")
+    friend.copy_runtime(candidate, args.client)
     for name in ("Assembly-CSharp.dll", "LanRoomUI.dll"):
         shutil.copy2(output / name, candidate / "CrazyShooter_Data/Managed" / name)
     base = output / "base-player.zip"
-    friend.build(base, candidate, "198.51.100.10", args.version)
+    friend.build(base, candidate, args.host, args.version, kind="join")
     install = output / "package"
     with zipfile.ZipFile(base) as archive:
         archive.extractall(install)
@@ -64,7 +72,7 @@ def main():
         "/out:" + str(install / "ECS-Acceptance.exe"), "tools/ecs-acceptance-runner.cs")
     run(csc, "/nologo", "/reference:Microsoft.CSharp.dll", "/reference:System.Web.Extensions.dll",
         "/out:" + str(install / "ECS-NetworkFault.exe"), "tools/ecs-network-fault.cs")
-    for name in ("Start-EcsAcceptance.ps1", "Collect-EcsEvidence.ps1", "Invoke-EcsNetworkFault.ps1", "fullscreen.ps1"):
+    for name in ("Start-EcsAcceptance.ps1", "Collect-EcsEvidence.ps1", "Invoke-EcsNetworkFault.ps1"):
         shutil.copy2(ROOT / "tools" / name, install / name)
     (install / "ACCEPTANCE-README.txt").write_text(
         "Mini Battlegrounds isolated ECS acceptance package; NOT a stable Release.\n"
@@ -79,7 +87,7 @@ def main():
     for name in ("Start Game.exe", "Updater.exe", "client/CrazyShooter_Data/Managed/Assembly-CSharp.dll", "client/CrazyShooter_Data/Managed/LanRoomUI.dll"):
         files.append({"path": name, "sha256": hashlib.sha256((install / name).read_bytes()).hexdigest()})
     commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
-    manifest = {"version": args.version + "-acceptance", "commit": commit,
+    manifest = {"version": args.version + "-acceptance", "host": args.host, "commit": commit,
                 "dirty": bool(subprocess.check_output(["git", "status", "--porcelain"], cwd=ROOT)),
                 "purpose": "Isolated ECS acceptance; ECS_ACCEPTANCE port override enabled; not a stable release",
                 "files": files}

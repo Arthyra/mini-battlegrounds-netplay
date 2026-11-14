@@ -18,13 +18,13 @@
 - 重连需要区分连接建立、战斗入场响应、场景恢复和 UDP 重新注册；不要把 Socket Connect 成功视作完整恢复。对旧连接回调、`writer` 和异步任务使用连接身份或代次守卫，防止旧连接清理新连接状态。
 ### 客户端构建配方（权威流程）
 
-- 权威配方在 `tools/build-acceptance.py`（验收变体，带 `-define:ECS_ACCEPTANCE`）。
-  发布稳定版用同样的步骤但**不加该 define**，且更新文件放版本化子目录。
+- 客户端 IL 注入参考流程在 `tools/build-acceptance.py`（隔离验收变体，带 `-define:ECS_ACCEPTANCE`）；正式构建**不能**包含该 define。打包发布入口为 `build-release.py`，但实际 DLL 需要事先按下面步骤重建。
+- 资源通过 `MBG_CLIENT_DIR`、`MBG_PATCH_INPUT`、`MBG_MONO_CECIL` 等显式传入，不能把本机私有路径当成权威构建配方。
 - 顺序：① csc `/noconfig /target:library /nostdlib`，引用 `client/.../Managed` 下的
   `mscorlib/System/System.Core/UnityEngine/UnityEngine.UI`，源文件
   `lan-room-ui.cs lan-scoreboard.cs ecs-diagnostics.cs ecs-battle-connect.cs` → `LanRoomUI.dll`；
   ② csc + Mono.Cecil 0.11.6 编译 `patch-lan-combat.cs` → 补丁工具；
-  ③ 补丁工具 + **未打补丁的原始 Assembly-CSharp.dll**（本机 `C:\Users\Example\.deepseek\mbg-lan-test\Assembly-CSharp-input.dll`）+ ① 的 DLL → 新 `Assembly-CSharp.dll`。
+  ③ 补丁工具 + **未打补丁的原始 Assembly-CSharp.dll**（通过 `--input` 或 `MBG_PATCH_INPUT` 指定）+ ① 的 DLL → 新 `Assembly-CSharp.dll`。
 - 验证：`ilcheck`（预期仅 `CS.Battle::RemoveUnit` 基线噪声）；标识符标记
   （UI 内 `GetLoginHost/EcsDiagnostics/EcsBattleConnect`，Assembly 内
   `ReconnectLanBattle/TickLanReconnect/mLanWorldDropPending`；标识符是 ASCII，
@@ -47,4 +47,5 @@
 - 本机游戏文件、私有构建输入和签名密钥不在 Git 中。通过命令参数、环境变量或忽略的本地配置传入；不要硬编码个人绝对路径。无法在干净环境重建的步骤必须列出缺失输入；不分发未授权的原游戏资源。
 - 自动更新要求有效的 RSA-SHA256 清单签名、ZIP SHA256 和可信 HTTPS。旧启动器兼容性可在服务端保留旧入口，但新启动器不得无提示降级到 HTTP。签名私钥只留在可信本地环境。
 - 部署 ECS 前先确认运行版本和当前对局，备份并准备回滚；破坏性或中断正式服务的操作需要授权。不要覆盖历史 Release/Tag、伪称未通过的验收已经完成或擅自发布候选构建。
+- 发布时检查 Release 标题格式 `vX.Y.Z — 简短修改主题`、README 当前版本与 Tag/附件一致。已发布的 notes 不再重复提交到仓库根目录。
 - 按逻辑单元提交，检查新增文件确实被追踪。用户可见的变更写入 GitHub Release Notes，遗留缺陷写入 Issue；临时 Worklog、原始日志与个人环境信息保留在 Git 忽略的本地目录，不为每个版本新增归档文档。

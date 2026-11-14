@@ -11,7 +11,7 @@ if __name__ == "__main__":
     parser.add_argument("--host", required=True)
     parser.add_argument("--players", type=int, choices=range(2, 9), default=2)
     args = parser.parse_args()
-    root = Path(__file__).resolve().parents[2]
+    root = Path(__file__).resolve().parents[1]
     sys.path.insert(0, str(root))
     os.environ["MBG_PROFILE_PATH"] = str(root / "acceptance-profiles.json")
     import server

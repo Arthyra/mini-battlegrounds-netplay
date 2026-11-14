@@ -6,17 +6,10 @@
 
 ## 版本与进展
 
-- **最新正式版：v0.11.4 — 车辆与投掷调整**（[Release](https://github.com/Ash-Rise/mini-battlegrounds-lan/releases/tag/lan-player-v0.11.4)）。全车前进、倒车最高速度提高 30%；快速点击投掷的准备与出手等待由约 0.90 秒缩至 0.25 秒。ECS 已同步部署，客户端需更新。
-- **大厅界面修复：v0.11.3**（[Release](https://github.com/Ash-Rise/mini-battlegrounds-lan/releases/tag/lan-player-v0.11.3)）。战斗中隐藏改名入口，非房主大厅按钮显示“准备／取消准备”。
-- **启动器热修复：v0.11.2**（[Release](https://github.com/Ash-Rise/mini-battlegrounds-lan/releases/tag/lan-player-v0.11.2)）。保留完整版本号比较，避免更新成功后反复提示同一个版本。
-- **连接恢复修复：v0.11.1**（[Release](https://github.com/Ash-Rise/mini-battlegrounds-lan/releases/tag/lan-player-v0.11.1)）。后续版本保留这些连接修复。
-- **上一里程碑：v0.11.0 — ECS Stable**（[Release](https://github.com/Ash-Rise/mini-battlegrounds-lan/releases/tag/lan-player-v0.11.0)）。
+- **最新正式版：[v0.11.5 — 联机稳定性修复](https://github.com/Ash-Rise/mini-battlegrounds-lan/releases/tag/lan-player-v0.11.5)**。新增大厅 TCP 静默检测、客户端持续无响应连接检测、场景资源保留和多网卡 LAN 发现。Windows 玩家包已发布；**ECS 端是否已同步部署本次服务端修复，需要单独核实**。
+- **开发中：v0.12.0 LAN Beta 候选（未发布）**。已完成单机协议与跨网卡发现测试，尚缺两台物理 Windows 的完整对局、断线恢复、离线网络与防火墙验收。详见 [Beta 验收记录](BETA-ACCEPTANCE-v0.12.0.md)。
 
-v0.11.0 完成了战斗断线恢复、重登、UDP 同步与服务端静默检测，并引入签名更新。v0.11.1 进一步修复 TCP 正常关闭后残留连接与登录卡住的问题，将战斗重连的连接等待移出 Unity 主线程，添加入场响应超时和重试限制，修复旧连接误清理新连接任务的竞态；新启动器只通过 HTTPS 获取更新，同时改进更新失败回滚。
-
-ECS 另已应用服务端热修复：所有玩家的大厅/战斗连接均断开后立即回收空对局，服务继续监听；车辆爆炸、投掷物及燃烧范围伤害能伤及引发者，自杀不计击杀数。v0.11.3 附带的 Windows 房主程序也已同步这些修复。
-
-已有 ECS 双客户端对局和断线恢复测试，但**不能据此声称全部真实网络故障场景已通过**。两台物理 Windows 的多轮故障回归、防火墙 TCP 黑洞、异常掉线及场景重载亮格问题仍在跟踪。
+历史修改与安装包统一以 [GitHub Releases](https://github.com/Ash-Rise/mini-battlegrounds-lan/releases) 为准。单机测试通过不等于两台物理电脑或长期稳定性验收；连续重进地图的内存变化仍需测量。
 
 ## 玩法概览
 
@@ -58,7 +51,7 @@ python3 server.py --players 8 --host <服务器公网IPv4> --bind 0.0.0.0
 
 ### 离线 LAN 与已知限制
 
-LAN 游戏的数据平面不应依赖 ECS；但启动器的公网自动更新检查可能在离线时失败，需确保它不会阻塞 LAN 游戏。LAN 的完全离线双机、不同网卡和防火墙场景还需专项验收，**目前不宣称 LAN 已全面稳定**。
+LAN 游戏的数据通信不依赖 ECS。启动器的公网更新检查已缩短超时，但完全离线启动仍可能等待一段时间。LAN 的物理双机、断线、热点和防火墙场景仍需专项验收，**目前不宣称 LAN 已全面稳定**。
 
 ## 源码结构
 
@@ -71,7 +64,8 @@ LAN 游戏的数据平面不应依赖 ECS；但启动器的公网自动更新检
 | `lan_share.py`、`prepare_lan_client.py` | LAN 临时分享与客户端地址准备 |
 | `build-friend-zip.py`、`build-release.py` | 从已准备的客户端生成分发包、签名更新清单 |
 | `tests/` | 协议、连接生命周期与更新器回归测试 |
-| `tools/` | 隔离 ECS 双机验收构建、故障注入与证据采集 |
+| `tools/` | 构建输入校验、隔离 ECS 验收与故障注入工具 |
+| `BETA-ACCEPTANCE-v0.12.0.md` | 当前未发布 Beta 的测试记录与未完成项 |
 | [GitHub Releases](https://github.com/Ash-Rise/mini-battlegrounds-lan/releases) | 发布记录、更新说明与玩家下载 |
 | `AGENTS.md` | Agent 开发约定 |
 
@@ -79,7 +73,7 @@ LAN 游戏的数据平面不应依赖 ECS；但启动器的公网自动更新检
 
 ## 测试与版本记录
 
-已解决的改动见 [GitHub Releases](https://github.com/Ash-Rise/mini-battlegrounds-lan/releases) 与 Git Commit；当前未解决问题见 [Issue #7](https://github.com/Ash-Rise/mini-battlegrounds-lan/issues/7)。自动回归在 `tests/`，隔离验收工具在 `tools/`。阶段 Worklog、原始机器日志和详细历史报告不再提交；旧文件仍可通过私有仓库 Git 历史回溯。没有执行的物理双机与网络故障测试不能标记通过。
+已解决的改动见 [GitHub Releases](https://github.com/Ash-Rise/mini-battlegrounds-lan/releases) 与 Git Commit；当前网络与场景遗留问题见 [Issue #7](https://github.com/Ash-Rise/mini-battlegrounds-lan/issues/7)、[Issue #8](https://github.com/Ash-Rise/mini-battlegrounds-lan/issues/8)。自动回归在 `tests/`，隔离验收工具在 `tools/`。阶段 Worklog、原始机器日志和详细历史报告不再提交；旧文件仍可通过私有仓库 Git 历史回溯。没有执行的物理双机与网络故障测试不能标记通过。
 
 ## 公开发布与资源说明
 

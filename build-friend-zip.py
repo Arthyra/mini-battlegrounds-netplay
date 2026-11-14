@@ -66,7 +66,8 @@ def build(output, client, host=None, version=None, kind="owner"):
                         str(ROOT / "updater.cs"), str(updater_info)], check=True)
         subprocess.run([str(csc), "/nologo", "/target:winexe", f"/out:{stage / 'Fullscreen.exe'}",
                         str(ROOT / "fullscreen-helper.cs")], check=True)
-        shutil.copy2(ROOT / "fullscreen.ps1", stage / "fullscreen.ps1")
+        # Fullscreen.exe is built from the tracked fullscreen-helper.cs.
+        # Do not require an untracked legacy fullscreen.ps1.
         launcher_info.unlink(missing_ok=True)
         updater_info.unlink(missing_ok=True)
         copy_runtime(stage / "client", client)
@@ -109,7 +110,9 @@ if __name__ == "__main__":
     parser.add_argument("--client", default=SOURCE, type=Path, help="prepared client directory")
     parser.add_argument("--host", help="host IP pre-filled in the launcher's server.txt")
     parser.add_argument("--version", help="version written into version.txt")
+    parser.add_argument("--kind", choices=("owner", "join"), default="owner",
+                        help="owner requires a bundled server; join omits it")
     args = parser.parse_args()
-    build(args.output, args.client, args.host, args.version)
+    build(args.output, args.client, args.host, args.version, args.kind)
 
 
