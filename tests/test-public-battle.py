@@ -1,8 +1,12 @@
+import argparse
 import socket
 import struct
 import time
 
-HOST = "198.51.100.10"
+_parser = argparse.ArgumentParser(description="Protocol regression against a live server")
+_parser.add_argument("--host", default="127.0.0.1",
+                     help="server address (pass the ECS or LAN host explicitly; no baked-in address)")
+HOST = _parser.parse_args().host
 LOGIN = 43120
 WORLD = 43123
 BATTLE = 43134

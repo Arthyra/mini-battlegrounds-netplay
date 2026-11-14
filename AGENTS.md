@@ -18,7 +18,7 @@
 - 重连需要区分连接建立、战斗入场响应、场景恢复和 UDP 重新注册；不要把 Socket Connect 成功视作完整恢复。对旧连接回调、`writer` 和异步任务使用连接身份或代次守卫，防止旧连接清理新连接状态。
 ### 客户端构建配方（权威流程）
 
-- 权威配方在 `tools/acceptance/build-acceptance.py`（验收变体，带 `-define:ECS_ACCEPTANCE`）。
+- 权威配方在 `tools/build-acceptance.py`（验收变体，带 `-define:ECS_ACCEPTANCE`）。
   发布稳定版用同样的步骤但**不加该 define**，且更新文件放版本化子目录。
 - 顺序：① csc `/noconfig /target:library /nostdlib`，引用 `client/.../Managed` 下的
   `mscorlib/System/System.Core/UnityEngine/UnityEngine.UI`，源文件

@@ -71,7 +71,7 @@ LAN 游戏的数据平面不应依赖 ECS；但启动器的公网自动更新检
 | `lan_share.py`、`prepare_lan_client.py` | LAN 临时分享与客户端地址准备 |
 | `build-friend-zip.py`、`build-release.py` | 从已准备的客户端生成分发包、签名更新清单 |
 | `tests/` | 协议、连接生命周期与更新器回归测试 |
-| `tools/acceptance/` | 隔离 ECS 双机验收构建、故障注入与证据采集 |
+| `tools/` | 隔离 ECS 双机验收构建、故障注入与证据采集 |
 | [GitHub Releases](https://github.com/Ash-Rise/mini-battlegrounds-lan/releases) | 发布记录、更新说明与玩家下载 |
 | `AGENTS.md` | Agent 开发约定 |
 
@@ -79,7 +79,7 @@ LAN 游戏的数据平面不应依赖 ECS；但启动器的公网自动更新检
 
 ## 测试与版本记录
 
-已解决的改动见 [GitHub Releases](https://github.com/Ash-Rise/mini-battlegrounds-lan/releases) 与 Git Commit；当前未解决问题见 [Issue #7](https://github.com/Ash-Rise/mini-battlegrounds-lan/issues/7)。自动回归在 `tests/`，隔离验收工具在 `tools/acceptance/`。阶段 Worklog、原始机器日志和详细历史报告不再提交；旧文件仍可通过私有仓库 Git 历史回溯。没有执行的物理双机与网络故障测试不能标记通过。
+已解决的改动见 [GitHub Releases](https://github.com/Ash-Rise/mini-battlegrounds-lan/releases) 与 Git Commit；当前未解决问题见 [Issue #7](https://github.com/Ash-Rise/mini-battlegrounds-lan/issues/7)。自动回归在 `tests/`，隔离验收工具在 `tools/`。阶段 Worklog、原始机器日志和详细历史报告不再提交；旧文件仍可通过私有仓库 Git 历史回溯。没有执行的物理双机与网络故障测试不能标记通过。
 
 ## 公开发布与资源说明
 

@@ -18,9 +18,9 @@ _module = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_module)
 build = _module.build
 
-DEFAULT_CLIENT = ROOT / "_local-archive" / "public-client-ecs"
 DEFAULT_OUTPUT = ROOT / "dist"
-DEFAULT_HOST = "198.51.100.10"
+# No built-in ECS address: pass --host or set MBG_ECS_HOST so a release can
+# never silently bake in a stale server address.
 DEFAULT_REPO = "Ash-Rise/mini-battlegrounds-lan"
 
 
@@ -43,8 +43,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--version", required=True, help="release version, for example 0.4")
     parser.add_argument("--package-version", help="Numeric executable/update version when promoting a newer numbered candidate")
-    parser.add_argument("--client", type=Path, default=DEFAULT_CLIENT, help="prepared public client directory")
-    parser.add_argument("--host", default=DEFAULT_HOST, help="address written to server.txt")
+    parser.add_argument("--client", type=Path,
+                        default=Path(os.environ["MBG_CLIENT_DIR"]) if os.environ.get("MBG_CLIENT_DIR") else None,
+                        help="Prepared public client directory; set MBG_CLIENT_DIR or pass --client")
+    parser.add_argument("--host",
+                        default=os.environ.get("MBG_ECS_HOST"),
+                        help="Server address written into the package (set MBG_ECS_HOST or pass --host)")
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--notes", type=Path, help="release notes Markdown file")
     parser.add_argument("--title", help="Release title, defaults to the version number")
@@ -54,16 +58,22 @@ def main():
                         default=Path(os.environ["MBG_UPDATE_SIGNING_KEY"]) if os.environ.get("MBG_UPDATE_SIGNING_KEY") else None,
                         help="Pinned RSA private PEM for signing latest.json (never commit)")
     parser.add_argument("--update-base-url", help="Public update directory URL, preferably HTTPS")
+    parser.add_argument("--kind", choices=("owner", "join"), default="owner",
+                        help="owner ships the LAN server; join ships a join-only client")
     args = parser.parse_args()
     if args.signing_key is None or not args.signing_key.is_file():
         parser.error("Set --signing-key or MBG_UPDATE_SIGNING_KEY to the matching RSA private PEM.")
+    if args.client is None:
+        parser.error("Set --client or MBG_CLIENT_DIR to the prepared public client directory.")
+    if not args.host:
+        parser.error("Set --host or MBG_ECS_HOST: a release must not bake in a stale server address.")
 
     args.output.mkdir(parents=True, exist_ok=True)
     archive = args.output / "Mini-Battlegrounds-LAN-Windows.zip"
     if archive.exists():
         archive.unlink()
     package_version = args.package_version or args.version
-    build(archive, args.client, args.host, package_version)
+    build(archive, args.client, args.host, package_version, args.kind)
 
     manifest = {
         "version": args.version,

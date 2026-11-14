@@ -19,10 +19,17 @@ def run(*args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--input", type=Path, default=Path(r"C:\Users\Example\.deepseek\mbg-lan-test\Assembly-CSharp-input.dll"))
-    parser.add_argument("--cecil", type=Path, default=Path(r"C:\Users\Example\.deepseek\workcopy\Mono.Cecil.dll"))
-    parser.add_argument("--version", default="0.11.1.2")
+    parser.add_argument("--input", type=Path,
+                        default=Path(os.environ["MBG_PATCH_INPUT"]) if os.environ.get("MBG_PATCH_INPUT") else None,
+                        help="Pristine (unpatched) Assembly-CSharp.dll; set MBG_PATCH_INPUT or pass --input")
+    parser.add_argument("--cecil", type=Path,
+                        default=Path(os.environ["MBG_MONO_CECIL"]) if os.environ.get("MBG_MONO_CECIL") else None,
+                        help="Mono.Cecil 0.11.6; set MBG_MONO_CECIL or pass --cecil")
+    parser.add_argument("--version", required=True, help="Acceptance package version label")
     args = parser.parse_args()
+    for name in ("input", "cecil"):
+        if getattr(args, name) is None:
+            parser.error(f"--{name} (or its MBG_* env var) is required: machine-local build asset")
     output = args.output.resolve()
     if output.exists():
         parser.error("Choose a new output directory to retain earlier evidence.")
@@ -54,11 +61,11 @@ def main():
         archive.extractall(install)
     run(csc, "/nologo", "/reference:System.Web.Extensions.dll",
         "/reference:System.IO.Compression.FileSystem.dll", "/reference:System.IO.Compression.dll",
-        "/out:" + str(install / "ECS-Acceptance.exe"), "tools/acceptance/ecs-acceptance-runner.cs")
+        "/out:" + str(install / "ECS-Acceptance.exe"), "tools/ecs-acceptance-runner.cs")
     run(csc, "/nologo", "/reference:Microsoft.CSharp.dll", "/reference:System.Web.Extensions.dll",
-        "/out:" + str(install / "ECS-NetworkFault.exe"), "tools/acceptance/ecs-network-fault.cs")
-    for name in ("Start-EcsAcceptance.ps1", "Collect-EcsEvidence.ps1", "Invoke-EcsNetworkFault.ps1"):
-        shutil.copy2(ROOT / "tools" / "acceptance" / name, install / name)
+        "/out:" + str(install / "ECS-NetworkFault.exe"), "tools/ecs-network-fault.cs")
+    for name in ("Start-EcsAcceptance.ps1", "Collect-EcsEvidence.ps1", "Invoke-EcsNetworkFault.ps1", "fullscreen.ps1"):
+        shutil.copy2(ROOT / "tools" / name, install / name)
     (install / "ACCEPTANCE-README.txt").write_text(
         "Mini Battlegrounds isolated ECS acceptance package; NOT a stable Release.\n"
         "Verify package hashes: ECS-Acceptance.exe --verify\n"

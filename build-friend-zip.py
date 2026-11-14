@@ -38,7 +38,11 @@ def _assembly_info(version, title):
 """ % (title, _quad(version), _quad(version), version)
 
 
-def build(output, client, host=None, version=None):
+def build(output, client, host=None, version=None, kind="owner"):
+    """kind: "owner" ships the LAN server (fails when it is missing);
+    "join" ships a join-only client without the server directory."""
+    if kind not in ("owner", "join"):
+        raise ValueError("kind must be 'owner' or 'join'.")
     output = output.resolve()
     if output.suffix.lower() != ".zip" or output.exists():
         raise ValueError("Choose a new .zip output path.")
@@ -73,14 +77,25 @@ def build(output, client, host=None, version=None):
             for name in dirnames + filenames:
                 os.chmod(os.path.join(dirpath, name), 0o755)
         server_source = ROOT / "dist" / "server"
-        if (server_source / "server.exe").is_file():
+        server_exe = server_source / "server.exe"
+        if kind == "owner":
+            if not server_exe.is_file():
+                raise ValueError(
+                    "Owner package requires dist/server/server.exe (build it with "
+                    "PyInstaller from server.py) plus the map/skin JSON files beside it.")
+            missing = [name for name in
+                       ("map102-vehicle-obstacles.json", "map102-vehicle-props.json", "skin-catalog.json")
+                       if not (server_source / name).is_file()]
+            if missing:
+                raise ValueError("Owner package server is missing data files: " + ", ".join(missing))
             server_stage = stage / "server"
             server_stage.mkdir()
-            shutil.copy2(server_source / "server.exe", server_stage / "server.exe")
+            shutil.copy2(server_exe, server_stage / "server.exe")
             for name in ("map102-vehicle-obstacles.json", "map102-vehicle-props.json", "skin-catalog.json"):
                 shutil.copy2(server_source / name, server_stage / name)
         if host:
             (stage / "server.txt").write_text(str(host) + "\n", encoding="ascii")
+        (stage / "package-kind.txt").write_text(kind + "\n", encoding="ascii")
         archive = Path(shutil.make_archive(str(stage.parent / stage.name) + "-client", "zip", stage))
         try:
             shutil.move(archive, output)

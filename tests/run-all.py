@@ -9,10 +9,11 @@ silently). Load each file by path instead and report a single verdict:
                                        # against the live ECS (needs the
                                        # room to be idle)
 
-C# helpers under tests/ and tools/acceptance/ are compiled tools with
+C# helpers under tests/ and tools/ are compiled tools with
 their own arguments; see the header of each file.
 """
 import importlib.util
+import os
 import subprocess
 import sys
 import unittest
@@ -49,9 +50,14 @@ def main():
     result = runner.run(suite)
     ok = result.wasSuccessful()
     if run_remote:
-        # test-public-battle.py is a script against the live ECS, not a
+        # test-public-battle.py is a script against a live server, not a
         # unittest case; run it as a child process and propagate the result.
-        remote = subprocess.run([sys.executable, str(HERE / REMOTE_FILE)])
+        # The target must be given explicitly (no baked-in server address).
+        host = os.environ.get("MBG_TEST_HOST")
+        if not host:
+            print("remote: FAIL (set MBG_TEST_HOST to the server address)")
+            sys.exit(1)
+        remote = subprocess.run([sys.executable, str(HERE / REMOTE_FILE), "--host", host])
         print("remote:", "PASS" if remote.returncode == 0 else "FAIL")
         ok = ok and remote.returncode == 0
     sys.exit(0 if ok else 1)
