@@ -532,7 +532,7 @@ internal sealed class LanLauncher : Form
         throw lastError ?? new InvalidOperationException("没有可用的更新服务器。");
     }
 
-    private static HttpWebRequest UpdateRequest(string url)
+    private static HttpWebRequest UpdateRequest(string url, int timeoutSeconds)
     {
         Uri uri;
         if (!Uri.TryCreate(url, UriKind.Absolute, out uri) || uri.Scheme != Uri.UriSchemeHttps)
@@ -540,15 +540,18 @@ internal sealed class LanLauncher : Form
         var request = (HttpWebRequest)WebRequest.Create(uri);
         request.Proxy = null;
         request.AllowAutoRedirect = false;
-        request.Timeout = 30000;
-        request.ReadWriteTimeout = 30000;
+        // The manifest is tiny: short timeouts so a fully offline LAN party
+        // settles quickly instead of waiting on unreachable endpoints. The
+        // archive download uses its own longer timeout.
+        request.Timeout = timeoutSeconds * 1000;
+        request.ReadWriteTimeout = timeoutSeconds * 1000;
         request.UserAgent = "MiniBattlegroundsUpdater/1.1";
         return request;
     }
 
-    private static HttpWebResponse UpdateResponse(string url)
+    private static HttpWebResponse UpdateResponse(string url, int timeoutSeconds)
     {
-        var response = (HttpWebResponse)UpdateRequest(url).GetResponse();
+        var response = (HttpWebResponse)UpdateRequest(url, timeoutSeconds).GetResponse();
         if (response.StatusCode != HttpStatusCode.OK)
         {
             response.Close();
@@ -559,7 +562,7 @@ internal sealed class LanLauncher : Form
 
     private static UpdateInfo FetchUpdateFrom(string url)
     {
-        using (var response = UpdateResponse(url))
+        using (var response = UpdateResponse(url, 10))
         using (var input = new StreamReader(response.GetResponseStream(), Encoding.UTF8))
         {
             var json = input.ReadToEnd();
@@ -578,7 +581,7 @@ internal sealed class LanLauncher : Form
 
     private static void DownloadUpdate(string url, string path, IProgress<UpdateProgress> progress)
     {
-        using (var response = UpdateResponse(url))
+        using (var response = UpdateResponse(url, 30))
         using (var input = response.GetResponseStream())
         using (var output = File.Create(path))
         {
