@@ -14,6 +14,12 @@ jobs:
           python-version: "3.11"
       - name: Run Python unit tests
         run: python tests/run-all.py
+      - name: Check build and acceptance scripts without private assets
+        run: |
+          python -m py_compile build-friend-zip.py build-release.py tools/build-acceptance.py tools/ecs-isolated-server.py tools/check-build-inputs.py
+          python build-friend-zip.py --help
+          python tools/build-acceptance.py --help
+          python tools/ecs-isolated-server.py --help
 
   windows-compile:
     runs-on: windows-latest
@@ -35,6 +41,18 @@ jobs:
           C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe -nologo -target:winexe -reference:System.Windows.Forms.dll -reference:System.Drawing.dll -reference:System.IO.Compression.FileSystem.dll -out:StartGame.exe lan-launcher.cs
           C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe -nologo -target:winexe -reference:System.Windows.Forms.dll -out:Updater.exe updater.cs
           C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe -nologo -target:winexe -out:Fullscreen.exe fullscreen-helper.cs
+      - name: Compile the isolated ECS acceptance runner
+        shell: cmd
+        run: C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe -nologo -reference:System.Web.Extensions.dll -reference:System.IO.Compression.FileSystem.dll -reference:System.IO.Compression.dll -out:ECS-Acceptance.exe tools\ecs-acceptance-runner.cs
+      - name: Validate acceptance PowerShell script syntax
+        shell: pwsh
+        run: |
+          Get-ChildItem tools -Filter *.ps1 | ForEach-Object {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Error $_ }; exit 1 }
+          }
       - name: Compile and smoke-run the update-policy test
         shell: cmd
         run: |
