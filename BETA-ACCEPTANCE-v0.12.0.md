@@ -1,7 +1,7 @@
 # v0.12.0 LAN Beta — 候选版本验收结论（不公开发布）
 
 候选包：`dist-beta/Mini-Battlegrounds-LAN-Windows.zip`（owner 版，含服务端）
-commit：`72127a4`；SHA256 只记录了前缀 `31d63640…`（正式双机验收前，须在本地重新计算并记录完整 SHA256）；构建输入：`public-client-v0115` + 当时的补丁源码
+commit：`7067c87`；SHA256：`7a14a657821134ee08c153b9f3091c156a9e2b9da2bed6a45df543540b2cb3b1`（2026-11-15 重算——干净 clone + 机器本地输入经 `tools/rebuild-client-dlls.py` 与 PyInstaller spec 重建，DLL 与发布版 md5 一致 9d999564，流程可复现；此前的 `72127a4` 包含陈旧 server.exe，已作废）
 
 ## 已验证（单机证据）
 - 13 单测全绿；CI（Python + Windows 编译检查）绿
