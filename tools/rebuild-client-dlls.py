@@ -49,6 +49,11 @@ def main():
     ui_sources = ["lan-room-ui.cs", "lan-scoreboard.cs", "ecs-diagnostics.cs", "ecs-battle-connect.cs"]
     run = lambda *args: subprocess.run([str(a) for a in args], cwd=ROOT, check=True)
 
+    # 0. the IL gate itself, from source
+    ilcheck_source = str(ROOT / "tools" / "ilcheck.cs")
+    run(csc, "/nologo", "-out:" + str(ROOT / "tools" / "ilcheck.exe"), ilcheck_source)
+    print("OK ilcheck.exe")
+
     # 1. LanRoomUI.dll against the client's own runtime assemblies (no
     #    ECS_ACCEPTANCE define: that variant is for isolated test packages).
     run(csc, "/nologo", "/noconfig", "/target:library", "/nostdlib",
@@ -69,19 +74,25 @@ def main():
         out / "LanRoomUI.dll")
     print("OK Assembly-CSharp.dll")
 
-    # 4. sanity
+    # 4. sanity — exit-code gate. Tolerated environment noise:
+    #    "ECall ..." (Unity native methods cannot JIT outside the engine;
+    #    the message is localized but the ECall prefix is stable) and the
+    #    game-native RemoveUnit generic resolution. Any other failure -
+    #    especially InvalidProgramException from bad patch IL - fails.
     ilcheck = ROOT / "tools/ilcheck.exe"
     if ilcheck.is_file():
-        result = subprocess.run([str(ilcheck), str(out / "Assembly-CSharp.dll")],
-                                capture_output=True, text=True, encoding="utf-8", errors="replace")
-        stdout = result.stdout or ""
-        noise = [line for line in stdout.splitlines()
-                 if line.startswith("FAIL") and "RemoveUnit" not in line]
-        if noise:
-            fail("ilcheck reported unexpected failures:\n  " + "\n  ".join(noise))
-        print("OK ilcheck (baseline noise only)")
+        result = subprocess.run([str(ilcheck), str(out / "Assembly-CSharp.dll"),
+                                 "ECall", "RemoveUnit"],
+                                capture_output=True, text=True,
+                                encoding="utf-8", errors="replace")
+        if result.returncode != 0:
+            stdout = result.stdout or ""
+            unexpected = [line for line in stdout.splitlines()
+                          if line.startswith("FAIL")]
+            fail("ilcheck gate failed:\n  " + "\n  ".join(unexpected))
+        print("OK ilcheck gate (baseline tolerated)")
     else:
-        print("SKIP ilcheck (tools/ilcheck.exe not present)")
+        print("SKIP ilcheck (tools/ilcheck.exe not built)")
 
 
 if __name__ == "__main__":

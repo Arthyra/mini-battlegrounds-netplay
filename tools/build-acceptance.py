@@ -69,9 +69,11 @@ def main():
         archive.extractall(install)
     run(csc, "/nologo", "/reference:System.Web.Extensions.dll",
         "/reference:System.IO.Compression.FileSystem.dll", "/reference:System.IO.Compression.dll",
-        "/out:" + str(install / "ECS-Acceptance.exe"), "tools/ecs-acceptance-runner.cs")
+        "/out:" + str(install / "ECS-Acceptance.exe"),
+        str(ROOT / "tools" / "ecs-acceptance-runner.cs"))
     run(csc, "/nologo", "/reference:Microsoft.CSharp.dll", "/reference:System.Web.Extensions.dll",
-        "/out:" + str(install / "ECS-NetworkFault.exe"), "tools/ecs-network-fault.cs")
+        "/out:" + str(install / "ECS-NetworkFault.exe"),
+        str(ROOT / "tools" / "ecs-network-fault.cs"))
     for name in ("Start-EcsAcceptance.ps1", "Collect-EcsEvidence.ps1", "Invoke-EcsNetworkFault.ps1"):
         shutil.copy2(ROOT / "tools" / name, install / name)
     (install / "ACCEPTANCE-README.txt").write_text(

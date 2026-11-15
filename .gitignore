@@ -46,8 +46,8 @@
 !/tools/prune-update-mirror.sh
 !/tools/check-build-inputs.py
 !/tools/rebuild-client-dlls.py
-!/tools/ilcheck.exe
-!/tools/PatchLanCombat.exe
+!/tools/ilcheck.cs
+!/tools/*.exe
 !/build/
 /build/*
 !/build/pyinstaller/
