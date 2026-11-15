@@ -45,5 +45,14 @@
 !/tools/Invoke-EcsNetworkFault.ps1
 !/tools/prune-update-mirror.sh
 !/tools/check-build-inputs.py
+!/tools/rebuild-client-dlls.py
+!/tools/ilcheck.exe
+!/tools/PatchLanCombat.exe
+!/build/
+/build/*
+!/build/pyinstaller/
+/build/pyinstaller/*
+!/build/pyinstaller/server.spec
+!/build/pyinstaller/*.config
 !/ecs-battle-connect.cs
 !/ecs-diagnostics.cs
