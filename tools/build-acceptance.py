@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -67,6 +68,10 @@ def main():
                     str(output / "Assembly-CSharp.dll"), str(output / "LanRoomUI.dll")],
                    cwd=output, check=True)
 
+    # build-friend-zip imports prepare_lan_client by module name; make the
+    # repo root importable regardless of how this script was launched
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
     spec = importlib.util.spec_from_file_location("friend", ROOT / "build-friend-zip.py")
     friend = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(friend)
