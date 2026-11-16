@@ -54,10 +54,12 @@ def main():
     run(csc, "/nologo", "/reference:" + str(args.cecil),
         "/out:" + str(tools / "PatchLanCombat.exe"), "patch-lan-combat.cs")
     # the patch tool resolves the UI module's dependencies from the UI dll's
-    # own directory; stage the Unity runtime beside LanRoomUI.dll the same
-    # way rebuild-client-dlls stages it inside Managed/
+    # own directory and the game module's from the exe dir / cwd; stage
+    # the Unity runtime beside LanRoomUI.dll and in tools/ the same way
+    # rebuild-client-dlls stages it inside Managed/
     for name in ("UnityEngine.dll", "UnityEngine.UI.dll"):
         shutil.copy2(runtime / name, output / name)
+        shutil.copy2(runtime / name, tools / name)
     run(tools / "PatchLanCombat.exe", args.input, output / "Assembly-CSharp.dll", output / "LanRoomUI.dll")
 
     spec = importlib.util.spec_from_file_location("friend", ROOT / "build-friend-zip.py")
