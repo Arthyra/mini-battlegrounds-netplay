@@ -22,7 +22,10 @@ GUIDE = """Mini Battlegrounds LAN · 102 复活模式
 
 
 def _quad(version):
-    parts = (str(version).split(".") + ["0", "0", "0", "0"])[:4]
+    # AssemblyVersion must be purely numeric: a pre-release label such as
+    # "0.12.0-rc2" keeps its suffix only in the informational version
+    numeric = str(version).split("-")[0]
+    parts = (numeric.split(".") + ["0", "0", "0", "0"])[:4]
     return ".".join(parts)
 
 
