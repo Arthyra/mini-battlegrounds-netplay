@@ -27,6 +27,7 @@
 !/tests/test-connection-lifecycle.py
 !/tests/test-room-and-explosion.py
 !/tests/test-gameplay-timing.py
+!/tests/test-multiround.py
 !/tests/test-discovery-endpoints.cs
 !/tests/test-tcp-fin.cs
 !/tests/test-battle-connect.cs
@@ -47,7 +48,7 @@
 !/tools/check-build-inputs.py
 !/tools/rebuild-client-dlls.py
 !/tools/ilcheck.cs
-!/tools/*.exe
+/tools/*.exe
 !/build/
 /build/*
 !/build/pyinstaller/

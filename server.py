@@ -1786,7 +1786,9 @@ class Match(asyncio.DatagramProtocol):
                 continue
             if self.owner_profile:
                 if not self.players:
-                    if not self.empty_since:
+                    if os.environ.get("MBG_NO_EMPTY_SHUTDOWN") == "1":
+                        self.empty_since = 0.0
+                    elif not self.empty_since:
                         self.empty_since = now
                     elif now - self.empty_since >= 120.0:
                         print("LAN room empty for 120s; shutting down", flush=True)
