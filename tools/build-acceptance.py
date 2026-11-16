@@ -57,10 +57,15 @@ def main():
     # own directory and the game module's from the exe dir / cwd; stage
     # the Unity runtime beside LanRoomUI.dll and in tools/ the same way
     # rebuild-client-dlls stages it inside Managed/
-    for name in ("UnityEngine.dll", "UnityEngine.UI.dll"):
+    for name in ("UnityEngine.dll", "UnityEngine.UI.dll", "UnityEngine.Networking.dll"):
         shutil.copy2(runtime / name, output / name)
-        shutil.copy2(runtime / name, tools / name)
-    run(tools / "PatchLanCombat.exe", args.input, output / "Assembly-CSharp.dll", output / "LanRoomUI.dll")
+    # the patch tool resolves the game module's references from the input
+    # dll's directory and the current directory; run it from the output dir
+    # so the staged Unity runtime covers both, regardless of where the
+    # machine-local pristine input lives
+    subprocess.run([str(tools / "PatchLanCombat.exe"), str(args.input),
+                    str(output / "Assembly-CSharp.dll"), str(output / "LanRoomUI.dll")],
+                   cwd=output, check=True)
 
     spec = importlib.util.spec_from_file_location("friend", ROOT / "build-friend-zip.py")
     friend = importlib.util.module_from_spec(spec)
