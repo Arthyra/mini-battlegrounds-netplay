@@ -2122,6 +2122,26 @@ internal static class PatchCombat
             branch.Operand = warning;
     }
 
+    private static void InstallPrepareSceneGuard(ModuleDefinition module)
+    {
+        // UpdateLoadingData only gates on the bundle listener; when the
+        // bundles finish before the server's enter-battle flow assigns
+        // mBattle (slow second client), PrepareScene dereferenced it null
+        // every frame and the loader never finished. Skip the frame until
+        // Enter() has populated mBattle.
+        var battle = module.GetType("CS.StageBattle");
+        var prepare = battle.Methods.FirstOrDefault(m => m.Name == "PrepareScene");
+        var mBattle = battle.Fields.FirstOrDefault(f => f.Name == "mBattle");
+        if (prepare == null || mBattle == null)
+            return;
+        var il = prepare.Body.GetILProcessor();
+        var first = prepare.Body.Instructions[0];
+        var tailRet = prepare.Body.Instructions.Last(i => i.OpCode == OpCodes.Ret);
+        il.InsertBefore(first, il.Create(OpCodes.Ldarg_0));
+        il.InsertBefore(first, il.Create(OpCodes.Ldfld, mBattle));
+        il.InsertBefore(first, il.Create(OpCodes.Brfalse_S, tailRet));
+    }
+
     private static void InstallUdpStats(ModuleDefinition module)
     {
         var tcp = module.GetType("CS.TcpServerProxy");
@@ -2772,6 +2792,7 @@ internal static class PatchCombat
                 Console.WriteLine("step loss"); InstallPacketLoss(module);
                 Console.WriteLine("step chat"); InstallUdpChatPrompt(module);
                 Console.WriteLine("step warn"); InstallLanUdpWarning(module);
+                Console.WriteLine("step prepareguard"); InstallPrepareSceneGuard(module);
                 Console.WriteLine("step udpstats"); InstallUdpStats(module);
                 Console.WriteLine("step udpfb"); InstallUdpFallback(module);
         Console.WriteLine("step moveresume"); InstallLanMoveResume(module);
