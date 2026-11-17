@@ -2139,52 +2139,97 @@ internal static class PatchCombat
         var recv = new FieldDefinition("LanUdpRecv", FieldAttributes.Public | FieldAttributes.Static, module.TypeSystem.Int32);
         var loss = new FieldDefinition("LanUdpLoss", FieldAttributes.Public | FieldAttributes.Static, module.TypeSystem.Int32);
         var pingEnabled = new FieldDefinition("LanUdpPingEnabled", FieldAttributes.Public | FieldAttributes.Static, module.TypeSystem.Boolean);
+        // the HUD loss% rolls over a 10s window so an early burst cannot
+        // poison the readout for the rest of the session
+        var winStart = new FieldDefinition("LanUdpWinStart", FieldAttributes.Public | FieldAttributes.Static, module.TypeSystem.Single);
         tcp.Fields.Add(rtt);
         tcp.Fields.Add(sent);
         tcp.Fields.Add(recv);
         tcp.Fields.Add(loss);
         tcp.Fields.Add(pingEnabled);
+        tcp.Fields.Add(winStart);
+        var engine = module.AssemblyResolver.Resolve(module.AssemblyReferences.Single(a => a.Name == "UnityEngine")).MainModule;
+        var getTime = module.ImportReference(Method(engine.GetType("UnityEngine.Time"), "get_time"));
+
         var loaded = battle.Methods.FirstOrDefault(m => m.Name == "HandleBattleLoaded");
         if (loaded != null)
         {
             var loadedFirst = loaded.Body.Instructions[0];
-            loaded.Body.GetILProcessor().InsertBefore(loadedFirst, loaded.Body.GetILProcessor().Create(OpCodes.Ldc_I4_1));
-            loaded.Body.GetILProcessor().InsertBefore(loadedFirst, loaded.Body.GetILProcessor().Create(OpCodes.Stsfld, pingEnabled));
+            var li = loaded.Body.GetILProcessor();
+            li.InsertBefore(loadedFirst, li.Create(OpCodes.Ldc_I4_1));
+            li.InsertBefore(loadedFirst, li.Create(OpCodes.Stsfld, pingEnabled));
+            // per-round baseline: never carry counters across rounds
+            li.InsertBefore(loadedFirst, li.Create(OpCodes.Ldc_I4_0));
+            li.InsertBefore(loadedFirst, li.Create(OpCodes.Stsfld, sent));
+            li.InsertBefore(loadedFirst, li.Create(OpCodes.Ldc_I4_0));
+            li.InsertBefore(loadedFirst, li.Create(OpCodes.Stsfld, recv));
+            li.InsertBefore(loadedFirst, li.Create(OpCodes.Ldc_I4_0));
+            li.InsertBefore(loadedFirst, li.Create(OpCodes.Stsfld, loss));
+            li.InsertBefore(loadedFirst, li.Create(OpCodes.Ldc_R4, 0f));
+            li.InsertBefore(loadedFirst, li.Create(OpCodes.Stsfld, rtt));
+            li.InsertBefore(loadedFirst, li.Create(OpCodes.Call, getTime));
+            li.InsertBefore(loadedFirst, li.Create(OpCodes.Stsfld, winStart));
         }
-        var engine = module.AssemblyResolver.Resolve(module.AssemblyReferences.Single(a => a.Name == "UnityEngine")).MainModule;
-        var getTime = module.ImportReference(Method(engine.GetType("UnityEngine.Time"), "get_time"));
 
         var ack = new MethodDefinition("LanUdpAck", MethodAttributes.Public | MethodAttributes.Static, module.TypeSystem.Void);
         ack.Parameters.Add(new ParameterDefinition("data", ParameterAttributes.None, new ArrayType(module.TypeSystem.Byte)));
         tcp.Methods.Add(ack);
         var ai = ack.Body.GetILProcessor();
         var ackRet = ai.Create(OpCodes.Ret);
+        var freshEnd = ai.Create(OpCodes.Nop);
+        var lossZero = ai.Create(OpCodes.Nop);
+        var lossStore = ai.Create(OpCodes.Nop);
         ai.Emit(OpCodes.Ldarg_0);
         ai.Emit(OpCodes.Ldc_I4_2);
         ai.Emit(OpCodes.Call, module.ImportReference(typeof(BitConverter).GetMethod("ToUInt16", new[] { typeof(byte[]), typeof(int) })));
         ai.Emit(OpCodes.Ldc_I4, 209);
         ai.Emit(OpCodes.Bne_Un, ackRet);
+        // sentAt = BitConverter.ToSingle(data, 18)
         ai.Emit(OpCodes.Ldarg_0);
         ai.Emit(OpCodes.Ldc_I4, 18);
         ai.Emit(OpCodes.Call, module.ImportReference(typeof(BitConverter).GetMethod("ToSingle", new[] { typeof(byte[]), typeof(int) })));
         ai.Emit(OpCodes.Stloc_0);
+        // rttVal = Time.time - sentAt
         ai.Emit(OpCodes.Call, getTime);
         ai.Emit(OpCodes.Ldloc_0);
         ai.Emit(OpCodes.Sub);
+        ai.Emit(OpCodes.Stloc_1);
+        // accept only 0..30s: anything else is a stale or duplicated echo
+        // and must not move the RTT readout
+        ai.Emit(OpCodes.Ldloc_1);
+        ai.Emit(OpCodes.Ldc_R4, 0f);
+        ai.Emit(OpCodes.Blt_Un, freshEnd);
+        ai.Emit(OpCodes.Ldloc_1);
+        ai.Emit(OpCodes.Ldc_R4, 30f);
+        ai.Emit(OpCodes.Bgt_Un, freshEnd);
+        ai.Emit(OpCodes.Ldloc_1);
         ai.Emit(OpCodes.Stsfld, rtt);
+        ai.Append(freshEnd);
+        // the delivery still counts, stale or not
         ai.Emit(OpCodes.Ldsfld, recv);
         ai.Emit(OpCodes.Ldc_I4_1);
         ai.Emit(OpCodes.Add);
         ai.Emit(OpCodes.Stsfld, recv);
+        // loss = max(sent - recv, 0) * 100 / sent; diff <= 0 covers the
+        // sent == 0 division hazard and post-reset late ACKs
         ai.Emit(OpCodes.Ldsfld, sent);
         ai.Emit(OpCodes.Ldsfld, recv);
         ai.Emit(OpCodes.Sub);
+        ai.Emit(OpCodes.Dup);
+        ai.Emit(OpCodes.Ldc_I4_0);
+        ai.Emit(OpCodes.Ble_S, lossZero);
         ai.Emit(OpCodes.Ldc_I4, 100);
         ai.Emit(OpCodes.Mul);
         ai.Emit(OpCodes.Ldsfld, sent);
         ai.Emit(OpCodes.Div);
+        ai.Emit(OpCodes.Br_S, lossStore);
+        ai.Append(lossZero);
+        ai.Emit(OpCodes.Pop);
+        ai.Emit(OpCodes.Ldc_I4_0);
+        ai.Append(lossStore);
         ai.Emit(OpCodes.Stsfld, loss);
         ai.Append(ackRet);
+        ack.Body.Variables.Add(new VariableDefinition(module.TypeSystem.Single));
         ack.Body.Variables.Add(new VariableDefinition(module.TypeSystem.Single));
 
         var send = new MethodDefinition("LanUdpPing", MethodAttributes.Public | MethodAttributes.Static, module.TypeSystem.Void);
@@ -2256,6 +2301,7 @@ internal static class PatchCombat
             local.Methods.Add(tick);
             var ti = tick.Body.GetILProcessor();
             var tickRet = ti.Create(OpCodes.Ret);
+            var doSend = ti.Create(OpCodes.Call, send);
             ti.Emit(OpCodes.Ldsfld, pingEnabled);
             ti.Emit(OpCodes.Brfalse, tickRet);
             ti.Emit(OpCodes.Call, getTime);
@@ -2265,7 +2311,21 @@ internal static class PatchCombat
             ti.Emit(OpCodes.Ldc_R4, 2f);
             ti.Emit(OpCodes.Add);
             ti.Emit(OpCodes.Stsfld, nextPing);
-            ti.Emit(OpCodes.Call, send);
+            // roll the loss window every 10s
+            ti.Emit(OpCodes.Call, getTime);
+            ti.Emit(OpCodes.Ldsfld, winStart);
+            ti.Emit(OpCodes.Sub);
+            ti.Emit(OpCodes.Ldc_R4, 10f);
+            ti.Emit(OpCodes.Blt_Un, doSend);
+            ti.Emit(OpCodes.Call, getTime);
+            ti.Emit(OpCodes.Stsfld, winStart);
+            ti.Emit(OpCodes.Ldc_I4_0);
+            ti.Emit(OpCodes.Stsfld, sent);
+            ti.Emit(OpCodes.Ldc_I4_0);
+            ti.Emit(OpCodes.Stsfld, recv);
+            ti.Emit(OpCodes.Ldc_I4_0);
+            ti.Emit(OpCodes.Stsfld, loss);
+            ti.Append(doSend);
             ti.Append(tickRet);
             var localUpdate = local.Methods.FirstOrDefault(m => m.Name == "Update");
             if (update != null)
@@ -2284,7 +2344,6 @@ internal static class PatchCombat
             g.Emit(OpCodes.Ret);
         }
     }
-
     private static void InstallLanUdpWarning(ModuleDefinition module)
     {
         var world = module.GetType("CS.WorldServerProxy");

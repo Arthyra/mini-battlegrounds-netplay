@@ -1875,7 +1875,7 @@ class Match(asyncio.DatagramProtocol):
         self.transport = transport
 
     def datagram_received(self, data, addr):
-        if len(data) not in (18, 38):
+        if len(data) not in (18, 22, 38):
             return
         size, message, battle_id, world_id, player_id, ticket = struct.unpack_from("<HHIHII", data)
         player = self.players.get(player_id)
@@ -1906,6 +1906,14 @@ class Match(asyncio.DatagramProtocol):
                     if pair not in self.forwarded:
                         self.forwarded.add(pair)
                         print(f"battle UDP 82 -> 52; player {player.id} to {member.id}", flush=True)
+        elif message == 210 and size == 22:
+            # UDP diagnostics: the patched client probes with message 210
+            # (its sent timestamp rides at offset 18) and reads the ACK
+            # message at offset 2 and the echo at offset 18. Mirror the
+            # standard header back as 209 with the payload echoed verbatim.
+            ack = struct.pack("<HHIHII", 22, 209, battle_id, WORLD_ID,
+                              player_id, ticket) + data[18:22]
+            self.transport.sendto(ack, addr)
 
 
 def enable_keepalive(writer):

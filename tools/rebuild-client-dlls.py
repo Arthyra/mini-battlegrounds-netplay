@@ -64,7 +64,8 @@ def main():
     print("OK LanRoomUI.dll")
 
     # 2. patch tool (with Cecil beside it so the exe can resolve the assembly)
-    shutil.copy2(cecil, ROOT / "tools/Mono.Cecil.dll")
+    if Path(cecil).resolve() != (ROOT / "tools/Mono.Cecil.dll").resolve():
+        shutil.copy2(cecil, ROOT / "tools/Mono.Cecil.dll")
     run(csc, "/nologo", "/reference:" + str(cecil),
         "/out:" + str(ROOT / "tools/PatchLanCombat.exe"), "patch-lan-combat.cs")
     print("OK PatchLanCombat.exe")
