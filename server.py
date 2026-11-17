@@ -571,6 +571,10 @@ async def send(writer, message, payload=b""):
 
 
 class Match(asyncio.DatagramProtocol):
+    # class-level defaults so Match.__new__-built test objects stay valid
+    force_ready = frozenset()
+    force_ready_loop_task = None
+
     def __init__(self, host, size, stock_vehicles=False, owner_profile=None):
         self.host = host
         self.size = size
@@ -598,6 +602,12 @@ class Match(asyncio.DatagramProtocol):
         self.empty_since = 0.0
         self.profile_path = profile_path(root)
         self.saved_profiles = json.loads(self.profile_path.read_text(encoding="utf-8")) if self.profile_path.exists() else {}
+        # isolated-test hook: auto-ready the named profiles after login so a
+        # mixed protocol-client + real-client GUI session can start without
+        # synthetic mouse clicks; explicit env only, never in production
+        self.force_ready = {p.strip() for p in os.environ.get("MBG_TEST_FORCE_READY", "").split(",") if p.strip()}
+        self.force_ready_loop_task = None
+        self.last_round_end = 0.0
         self.skin_catalog = {
             kind: (category, item)
             for kind, category, item in json.loads((root / "skin-catalog.json").read_text(encoding="utf-8"))
@@ -606,7 +616,30 @@ class Match(asyncio.DatagramProtocol):
             struct.pack("<I", kind) + skin_stats(kind) for kind in self.skin_catalog
         )
 
+    async def force_ready_loop(self):
+        # isolated-test helper: keep the named profiles ready so mixed
+        # protocol-client + real-client GUI sessions cycle rounds without
+        # synthetic mouse clicks. Explicit MBG_TEST_FORCE_READY only.
+        while True:
+            await asyncio.sleep(1.0)
+            if self.queued or len(self.players) < 2:
+                continue
+            # rapid-fire rounds starve the real client's return-to-lobby
+            # path (StageBattle.PrepareScene races mBattle init and NREs
+            # forever); leave a human-paced gap between rounds
+            if time.time() - self.last_round_end < 12.0:
+                continue
+            fired = False
+            for player in self.lobby_members():
+                if player.profile_name in self.force_ready and not player.room_ready:
+                    player.room_ready = True
+                    fired = True
+                    print(f"test force-ready: {player.profile_name}", flush=True)
+            if fired and os.environ.get("MBG_TEST_AUTOSTART") == "1":
+                self.start_room(self.owner)
+
     def reset_round_state(self):
+        self.last_round_end = time.time()
         self.queued = []
         self.joined = []
         self.started = False
@@ -865,6 +898,8 @@ class Match(asyncio.DatagramProtocol):
         await send(writer, SKINS_GET, self.skin_inventory)
         await send(writer, SKIN_APPLIES_GET, self.skin_applies(player))
         await send(writer, 119)
+        if self.force_ready and not self.force_ready_loop_task:
+            self.force_ready_loop_task = asyncio.create_task(self.force_ready_loop())
         self.send_room_state()
         while True:
             try:
@@ -1807,7 +1842,7 @@ class Match(asyncio.DatagramProtocol):
                     print(f"round {self.battle_id} time limit; result shown", flush=True)
                 if now - self.round_started >= ROUND_TIME + ROUND_END_DELAY:
                     self.broadcast(BATTLE_CLOSE, b"")
-                    self.finish_round("5 minute time limit")
+                    self.finish_round(f"{ROUND_TIME:.0f}s time limit")
                     continue
             for player in list(self.joined):
                 if player.disconnected_at and now - player.disconnected_at >= RECONNECT_GRACE:
