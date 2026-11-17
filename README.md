@@ -6,7 +6,7 @@
 
 ## 版本与进展
 
-- **最新正式版：[v0.11.5 — 联机稳定性修复](https://github.com/Ash-Rise/mini-battlegrounds-lan/releases/tag/lan-player-v0.11.5)**。新增大厅 TCP 静默检测、客户端持续无响应连接检测、场景资源保留和多网卡 LAN 发现。Windows 玩家包已发布；**ECS 端是否已同步部署本次服务端修复，需要单独核实**。
+- **最新正式版：[v0.12.0 — LAN Beta：UDP 诊断闭环、故障回归与加载竞态修复](https://github.com/Ash-Rise/mini-battlegrounds-lan/releases/tag/lan-player-v0.12.0)**。UDP 探测/确认闭环与 HUD 延迟丢包读数、UDP 丢包/突发/乱序/黑障回归、双开第二客户端卡加载的竞态修复。owner/join 双包已发布；ECS 端部署与本版本服务端的同步需单独核实。
 - **开发中：v0.12.0 LAN Beta 候选（未发布）**。已完成单机协议与跨网卡发现测试，尚缺两台物理 Windows 的完整对局、断线恢复、离线网络与防火墙验收。详见 [Beta 验收记录](BETA-ACCEPTANCE-v0.12.0.md)。
 
 历史修改与安装包统一以 [GitHub Releases](https://github.com/Ash-Rise/mini-battlegrounds-lan/releases) 为准。单机测试通过不等于两台物理电脑或长期稳定性验收；连续重进地图的内存变化仍需测量。

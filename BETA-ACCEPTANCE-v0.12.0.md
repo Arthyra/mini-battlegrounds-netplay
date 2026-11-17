@@ -1,6 +1,15 @@
 # v0.12.0 LAN Beta — 候选版本验收结论（不公开发布）
 
-**当前候选（2026-11-17，commit `254fd59`，干净克隆构建，含 UDP 诊断闭环）：**
+**已发布：v0.12.0（2026-11-18，commit `c2766f4`，干净克隆构建）**
+- Release：`lan-player-v0.12.0`（GitHub Release，附件哈希已下载复验一致）
+- owner `Mini-Battlegrounds-LAN-Windows.zip`：`67ea85ed5c4cb9b6969355bee52a45b0675f7ff32fdbdd916d05f38f72c11cae`
+- join `Mini-Battlegrounds-LAN-Windows-join.zip`：`94b8b173fa7827f69b561d3184b9a0885b43909f03864fbc7fa9c250b1afe200`
+- 发布前最后一轮修复：`PrepareScene` 未赋值竞态（c2766f4），并纳入 UDP 统计重设计（e9b93d0）
+- 实际双客户端验收：21 轮进出地图循环全部成功加载，内存呈缓存高水位
+  （clientA 四分位 332/369/322/359、clientB 从 576 高水位回落 374，无泄漏
+  证据）；剩余 1069 条名牌 NRE 为非阻塞已知缺陷
+
+**历史候选（已被正式版取代）**：`254fd59`
 - owner（含服务端）：`03552ead54090819bf5be96c9d44201e4521fa808ffd7ea0194fcf4602ff96d3`
 - join（仅加入）：`88bac4f7ba64547809ea3a89fa7041a6da469dd29e40db220b038d8820e2d1ef`
 - 候选内 server.exe 冒烟通过；两包 DLL 与本地确定性构建逐字节一致
