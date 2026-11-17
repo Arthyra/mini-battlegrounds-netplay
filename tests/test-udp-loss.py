@@ -302,14 +302,18 @@ if __name__ == "__main__":
         failures.append("burst recovery")
 
     # 4. reorder: hold 40% of forward datagrams 150ms
+    # with a fixed seed this hold pattern provably reorders: 40% of the
+    # datagrams wait 150ms while the send gap is 150ms, so held copies
+    # overtake later sends; the assertion below fails if NO inversion is
+    # observed (i.e. the injection silently did nothing)
     relay_a.forward_hold = lambda data: REORDER_DELAY if random.random() < 0.4 else 0.0
     ca.settimeout(0.4)
     arrivals = []
-    for i in range(10):
+    for i in range(12):
         ca.sendto(ping_packet(bid, a_id, float(i)), ("127.0.0.1", relay_a.port))
         time.sleep(0.15)
     deadline = time.time() + 5
-    while time.time() < deadline and len(arrivals) < 10:
+    while time.time() < deadline and len(arrivals) < 12:
         try:
             data, addr = ca.recvfrom(4096)
             if struct.unpack_from("<H", data, 2)[0] == 209:
@@ -317,15 +321,36 @@ if __name__ == "__main__":
         except socket.timeout:
             pass
     relay_a.forward_hold = lambda data: 0.0
-    reordered = any(arrivals[i] > arrivals[i + 1] for i in range(len(arrivals) - 1))
-    print(f"reorder: {len(arrivals)}/10 ACKs, out-of-order={reordered}")
-    if len(arrivals) < 8:
+    inversions = sum(1 for i in range(len(arrivals) - 1) if arrivals[i] > arrivals[i + 1])
+    print(f"reorder: {len(arrivals)}/12 ACKs, inversions={inversions}")
+    if len(arrivals) < 10:
         failures.append(f"reorder lost ACKs ({len(arrivals)})")
+    if inversions == 0:
+        failures.append("reorder injection produced no inversion")
 
-    # 5. blackout: 16s full UDP cut (both directions), TCP stays alive
+    # 5. blackout: 16s full UDP cut (both directions) while probes and
+    # status keeps flowing - proves the injection is live (zero ACKs get
+    # through) and that TCP stays calm the whole time
     relay_a.blackout = True
-    print("blackout: UDP cut for 16s...")
-    time.sleep(16)
+    print("blackout: UDP cut for 16s, probes continue...")
+    leaked_acks = 0
+    blackout_deadline = time.time() + 16
+    probe_i = 0
+    while time.time() < blackout_deadline:
+        ca.sendto(ping_packet(bid, a_id, 5000.0 + probe_i), ("127.0.0.1", relay_a.port))
+        ca.sendto(status_packet(bid, a_id, 50.0 + probe_i, 1.0, 2.0, 0.0, 0.0),
+                  ("127.0.0.1", relay_a.port))
+        probe_i += 1
+        ca.settimeout(0.5)
+        try:
+            data, addr = ca.recvfrom(4096)
+            if struct.unpack_from("<H", data, 2)[0] == 209:
+                leaked_acks += 1
+        except socket.timeout:
+            pass
+    if leaked_acks:
+        failures.append(f"blackout leaked {leaked_acks} ACKs")
+    print(f"blackout: {probe_i} probes injected, {leaked_acks} ACKs leaked")
     a_battle.settimeout(8)
     try:
         msg, _ = base.recv_msg(a_battle)

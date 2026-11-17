@@ -1906,11 +1906,14 @@ class Match(asyncio.DatagramProtocol):
                     if pair not in self.forwarded:
                         self.forwarded.add(pair)
                         print(f"battle UDP 82 -> 52; player {player.id} to {member.id}", flush=True)
-        elif message == 210 and size == 22:
+        elif message == 210 and size == 22 and player.udp == addr:
             # UDP diagnostics: the patched client probes with message 210
             # (its sent timestamp rides at offset 18) and reads the ACK
             # message at offset 2 and the echo at offset 18. Mirror the
             # standard header back as 209 with the payload echoed verbatim.
+            # The registration gate keeps an unregistered or stale address
+            # from buying a healthy diagnostic while relays still target
+            # the registered channel.
             ack = struct.pack("<HHIHII", 22, 209, battle_id, WORLD_ID,
                               player_id, ticket) + data[18:22]
             self.transport.sendto(ack, addr)
