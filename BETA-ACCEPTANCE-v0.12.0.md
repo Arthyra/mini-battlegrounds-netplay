@@ -1,8 +1,11 @@
 # v0.12.0 LAN Beta — 候选版本验收结论（不公开发布）
 
-候选包：`dist-beta/Mini-Battlegrounds-LAN-Windows.zip`（owner 版，含服务端）
-commit：`7067c87`；SHA256：`7a14a657821134ee08c153b9f3091c156a9e2b9da2bed6a45df543540b2cb3b1`（2026-11-15 重算——干净 clone + 机器本地输入经 `tools/rebuild-client-dlls.py` 与 PyInstaller spec 重建，DLL 与发布版 md5 一致 9d999564，流程可复现；此前的 `72127a4` 包含陈旧 server.exe，已作废）
+**当前候选（2026-11-17，commit `254fd59`，干净克隆构建，含 UDP 诊断闭环）：**
+- owner（含服务端）：`03552ead54090819bf5be96c9d44201e4521fa808ffd7ea0194fcf4602ff96d3`
+- join（仅加入）：`88bac4f7ba64547809ea3a89fa7041a6da469dd29e40db220b038d8820e2d1ef`
+- 候选内 server.exe 冒烟通过；两包 DLL 与本地确定性构建逐字节一致
 
+**已作废候选**：`188434f`（owner `05f6ad84…` / join `51b83de0…`，缺 UDP 诊断闭环与丢包回归）；`7067c87`（owner `7a14a657…`，更早）；`72127a4`（陈旧 server.exe）。
 ## 已验证（单机证据）
 - 13 单测全绿；CI（Python + Windows 编译检查）绿
 - 协议回归 `--remote` 对 ECS 与对 **WLAN 绑定的本地房间**（跨接口 LAN 形态）均 PASS：
@@ -37,7 +40,9 @@ commit：`7067c87`；SHA256：`7a14a657821134ee08c153b9f3091c156a9e2b9da2bed6a45
   （每帧 0.05-2.0s 每方向）；最坏服务端间隔 ~4s，远小于 15s 静默窗口；整局完成、
   战斗帧持续到达、大厅链路存活到回合结束后。ping 必须在握手期间启动（抖动握手
   本身消耗 ~10s 大厅计时）。
-- UDP 部分丢包不单测：数据报相互独立，100% 中断（multiround）为最严苛超集。
+- `tests/test-udp-loss.py`（d905101）：per-player 故障中继注入随机 30% 丢包、
+  6-of-8 突发、40% 150ms 乱序、16s 双向黑障与恢复；全程 TCP 平静，恢复后中继
+  携带新坐标（无陈旧快照）。210→209 诊断回显闭环与 10s 窗口丢包率同轮修复。
 - 套件 13 单测全绿；4 个故障脚本 + 单测全部本地验证（2026-11-17）。
 
 ### 干净区验收构建暴露并修复的缺陷（2d91eec..188434f）
