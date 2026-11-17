@@ -1,4 +1,4 @@
-"""Multi-round and failure-injection regression on top of test-public-battle.
+"""Multi-round cycle and UDP-interruption regression.
 
 Runs against a live local server started with MBG_TEST_AUTOSTART=1 and a
 short round (for example: MBG_ROUND_TIME=20 server.exe --players 2 ...),
@@ -6,11 +6,13 @@ then covers what the single-round script does not:
 
   1. multi-round cycle: both players re-ready in the lobby and start
      consecutive rounds without restarting the server
-  2. UDP interruption: dropping a player's UDP path must NOT trigger a
-     TCP reconnect - the lobby/battle TCP stays established
-  3. server crash: SIGKILL mid-battle, systemd restarts, both clients
-     re-login and rejoin a fresh round automatically
-  4. offline: the update endpoint is unreachable while the game runs
+  2. UDP interruption: dropping a player's UDP path entirely must NOT
+     trigger a TCP reconnect - the lobby/battle TCP stays established
+
+Not covered here (each has its own script): partial UDP loss, bursts
+and reorder live in test-udp-loss.py; server crash + restart lives in
+test-crash-restart.py; per-frame latency jitter lives in
+test-jitter-proxy.py.
 
 Usage:
   python tests/test-multiround.py --host 127.0.0.1 [--rounds 3]
