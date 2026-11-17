@@ -121,6 +121,7 @@ RESPAWN_MODE = 4
 ROOM_STATE = 210
 BATTLE_END = 41
 BATTLE_CLOSE = 43
+ROOM_CONFIG = 212
 SCOREBOARD = 216
 ROOM_START = 211
 LAST_WEAPON = 212
@@ -608,6 +609,7 @@ class Match(asyncio.DatagramProtocol):
         self.force_ready = {p.strip() for p in os.environ.get("MBG_TEST_FORCE_READY", "").split(",") if p.strip()}
         self.force_ready_loop_task = None
         self.last_round_end = 0.0
+        self.round_time = ROUND_TIME
         self.skin_catalog = {
             kind: (category, item)
             for kind, category, item in json.loads((root / "skin-catalog.json").read_text(encoding="utf-8"))
@@ -706,6 +708,7 @@ class Match(asyncio.DatagramProtocol):
         return {
             "started": self.started,
             "battle_id": self.battle_id,
+            "round_time": self.round_time,
             "size": self.size,
             "owner": self.owner.id if self.owner else None,
             "players": [
@@ -945,6 +948,21 @@ class Match(asyncio.DatagramProtocol):
                 if (os.environ.get("MBG_TEST_AUTOSTART") == "1" and len(self.players) >= 2
                         and all(p.room_ready for p in self.players.values())):
                     asyncio.get_running_loop().call_later(1.0, self.start_room, self.owner)
+            elif message == ROOM_CONFIG and len(payload) == 4:
+                # v0.13.0 custom rooms: the owner may retarget the player cap
+                # (never above the slots the server was started with) and the
+                # round length; both are server-authoritative and take effect
+                # from the next room start
+                max_players, round_seconds = struct.unpack_from("<HH", payload)
+                if player is not self.owner:
+                    print(f"room config rejected: player {player.id} is not the owner", flush=True)
+                elif not (2 <= max_players <= self.size and 30 <= round_seconds <= 600):
+                    print(f"room config rejected: cap {max_players} round {round_seconds}s out of range", flush=True)
+                else:
+                    self.size = max_players
+                    self.round_time = float(round_seconds)
+                    print(f"room config: cap {self.size} round {self.round_time:.0f}s by player {player.id}", flush=True)
+                    self.send_room_state()
             elif message == ROOM_START and not payload:
                 self.start_room(player)
 
@@ -1834,15 +1852,15 @@ class Match(asyncio.DatagramProtocol):
                 if self.queued and now >= self.loading_deadline:
                     self.finish_round("loading timed out")
                 continue
-            if self.round_started and now - self.round_started >= ROUND_TIME:
+            if self.round_started and now - self.round_started >= self.round_time:
                 if not self.round_ending:
                     self.round_ending = True
                     self.broadcast(SCOREBOARD, self.score_text(True).encode("utf-8"))
                     self.broadcast(BATTLE_END, b"")
                     print(f"round {self.battle_id} time limit; result shown", flush=True)
-                if now - self.round_started >= ROUND_TIME + ROUND_END_DELAY:
+                if now - self.round_started >= self.round_time + ROUND_END_DELAY:
                     self.broadcast(BATTLE_CLOSE, b"")
-                    self.finish_round(f"{ROUND_TIME:.0f}s time limit")
+                    self.finish_round(f"{self.round_time:.0f}s time limit")
                     continue
             for player in list(self.joined):
                 if player.disconnected_at and now - player.disconnected_at >= RECONNECT_GRACE:

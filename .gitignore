@@ -32,6 +32,7 @@
 !/tests/test-jitter-proxy.py
 !/tests/test-udp-loss.py
 !/tests/test-udp-stats-semantics.py
+!/tests/test-room-config.py
 !/tests/test-discovery-endpoints.cs
 !/tests/test-tcp-fin.cs
 !/tests/test-battle-connect.cs
