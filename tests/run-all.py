@@ -36,6 +36,7 @@ HERE = Path(__file__).resolve().parent
 
 UNIT_FILES = [
     "test-connection-lifecycle.py",
+    "test-udp-stats-semantics.py",
     "test-room-and-explosion.py",
     "test-gameplay-timing.py",
 ]
@@ -96,6 +97,14 @@ def run_live(here):
     if not exe.is_file():
         print("live: SKIP (dist/server/server.exe is not built)")
         return True
+    # refuse to run over a stale test server: the runner must own the
+    # ports, or round lengths and registrations silently mismatch
+    probe = socket.socket()
+    occupied = probe.connect_ex(("127.0.0.1", 43120)) == 0
+    probe.close()
+    if occupied:
+        print("live: FAIL (port 43120 already occupied; stop any running test server)")
+        return False
     ok = True
     server = None
     current_round = None
