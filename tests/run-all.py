@@ -44,11 +44,13 @@ UNIT_FILES = [
 REMOTE_FILE = "test-public-battle.py"
 
 LIVE_PLAN = [
-    # (script, server round seconds; None = script manages its own server)
-    ("test-multiround.py", 20),
-    ("test-jitter-proxy.py", 20),
-    ("test-udp-loss.py", 120),
-    ("test-crash-restart.py", None),
+    # (script, server round seconds, started slots; script None = it
+    # manages its own server)
+    ("test-multiround.py", 20, 2),
+    ("test-jitter-proxy.py", 20, 2),
+    ("test-udp-loss.py", 120, 2),
+    ("test-crash-restart.py", None, None),
+    ("test-room-config.py", 120, 4),
 ]
 
 
@@ -61,12 +63,12 @@ def load_suite(name):
     return unittest.defaultTestLoader.loadTestsFromModule(module)
 
 
-def start_local_server(exe, round_time):
+def start_local_server(exe, round_time, slots):
     env = dict(os.environ,
                MBG_TEST_AUTOSTART="1",
                MBG_ROUND_TIME=str(round_time),
                MBG_NO_EMPTY_SHUTDOWN="1")
-    proc = subprocess.Popen([str(exe), "--players", "2", "--host", "127.0.0.1",
+    proc = subprocess.Popen([str(exe), "--players", str(slots), "--host", "127.0.0.1",
                              "--bind", "127.0.0.1", "--admin-port", "0"],
                             env=env, stdout=subprocess.DEVNULL,
                             stderr=subprocess.DEVNULL)
@@ -109,12 +111,12 @@ def run_live(here):
     server = None
     current_round = None
     try:
-        for name, round_time in LIVE_PLAN:
+        for name, round_time, slots in LIVE_PLAN:
             if round_time is not None:
-                if server is None or current_round != round_time:
+                if server is None or current_round != (round_time, slots):
                     stop_local_server(server)
-                    server = start_local_server(exe, round_time)
-                    current_round = round_time
+                    server = start_local_server(exe, round_time, slots)
+                    current_round = (round_time, slots)
             else:
                 stop_local_server(server)
                 server = None
