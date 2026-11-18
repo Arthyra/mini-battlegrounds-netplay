@@ -111,40 +111,10 @@ public sealed class LanRoomUI : MonoBehaviour
         status.alignment = TextAnchor.MiddleRight;
         status.raycastTarget = false;
 
-        // Clone the rename button before adding LanRoomUI to the ready button;
-        // otherwise the clone inherits a second component with null fields.
-        var rename = Instantiate(ready);
-        rename.name = "LanRename";
         var canvas = ready.GetComponentInParent<Canvas>();
-        rename.transform.SetParent(canvas != null ? canvas.transform : root, false);
-        rename.transform.SetAsLastSibling();
-        var renameRect = (RectTransform)rename.transform;
-        renameRect.anchorMin = renameRect.anchorMax = new Vector2(0, 0);
-        renameRect.pivot = new Vector2(0, 0);
-        renameRect.anchoredPosition = new Vector2(24, 165);
-        renameRect.sizeDelta = new Vector2(170, 48);
-        var oldRenameText = rename.transform.Find("Text");
-        if (oldRenameText != null)
-        {
-            var old = oldRenameText.GetComponent<Text>();
-            if (old != null)
-                old.text = "";
-        }
-        var renameLabel = Instantiate(label);
-        renameLabel.name = "RenameText";
-        renameLabel.transform.SetParent(rename.transform, false);
-        var renameLabelRect = renameLabel.rectTransform;
-        renameLabelRect.anchorMin = Vector2.zero;
-        renameLabelRect.anchorMax = Vector2.one;
-        renameLabelRect.offsetMin = Vector2.zero;
-        renameLabelRect.offsetMax = Vector2.zero;
-        renameLabel.text = "\u6539\u540d";
-        renameLabel.font = label.font;
-        renameLabel.fontSize = 24;
-        renameLabel.color = label.color;
-        renameLabel.alignment = TextAnchor.MiddleCenter;
-        renameLabel.raycastTarget = false;
-        renameLabel.enabled = true;
+        var rename = MakeFlatButton("LanRename",
+            canvas != null ? canvas.transform : root, new Vector2(24, 165),
+            new Vector2(170, 48), "改名", label.font);
 
         var members = Instantiate(label);
         members.name = "LanRoomMembers";
@@ -279,8 +249,6 @@ public sealed class LanRoomUI : MonoBehaviour
 
     private void OnGUI()
     {
-        if (!renaming)
-            return;
         if (statusLabel != null && statusLabel.font != null)
             GUI.skin.font = statusLabel.font;
         GUI.skin.box.fontSize = 20;
@@ -288,6 +256,10 @@ public sealed class LanRoomUI : MonoBehaviour
         GUI.skin.button.fontSize = 18;
         GUI.skin.textField.fontSize = 20;
 
+        // each dialog draws independently: the settings dialog used to sit
+        // behind an "if (!renaming) return;" and could never appear on screen
+        if (renaming)
+        {
         var box = new Rect((Screen.width - 380) / 2, (Screen.height - 220) / 2, 380, 220);
         GUI.Box(box, "\u4fee\u6539\u6635\u79f0");
         editName = GUI.TextField(new Rect(box.x + 20, box.y + 54, 340, 34), editName, 16);
@@ -316,6 +288,7 @@ public sealed class LanRoomUI : MonoBehaviour
         {
             renaming = false;
             renameMessage = string.Empty;
+        }
         }
 
         if (!configOpen)
