@@ -28,11 +28,13 @@ public sealed class LanRoomUI : MonoBehaviour
     private bool renaming;
     private string editName = string.Empty;
     private string renameMessage = string.Empty;
-    private Button capMinusButton;
-    private Button capPlusButton;
-    private Button roundButton;
+    private Button settingsButton;
+    private bool configOpen;
+    private int configCap;
+    private int configRound;
+    private string configMessage = string.Empty;
     private static readonly int[] roundChoices = { 60, 120, 300, 30 };
-    private static int roundSeconds = 120;
+    private static int roundSeconds;   // 0 = the server default, not overridden here
 
     public static string GetLoginHost(string fallback)
     {
@@ -174,52 +176,20 @@ public sealed class LanRoomUI : MonoBehaviour
         });
         view.renameButton = rename;
 
-        var capMinus = Instantiate(ready);
-        capMinus.name = "LanCapMinus";
-        capMinus.transform.SetParent(canvas != null ? canvas.transform : root, false);
-        capMinus.transform.SetAsLastSibling();
-        var capMinusRect = (RectTransform)capMinus.transform;
-        capMinusRect.anchorMin = capMinusRect.anchorMax = new Vector2(0, 0);
-        capMinusRect.pivot = new Vector2(0, 0);
-        capMinusRect.anchoredPosition = new Vector2(210, 165);
-        capMinusRect.sizeDelta = new Vector2(56, 48);
-        SetCloneText(capMinus, label, "-");
-
-        var capPlus = Instantiate(ready);
-        capPlus.name = "LanCapPlus";
-        capPlus.transform.SetParent(canvas != null ? canvas.transform : root, false);
-        capPlus.transform.SetAsLastSibling();
-        var capPlusRect = (RectTransform)capPlus.transform;
-        capPlusRect.anchorMin = capPlusRect.anchorMax = new Vector2(0, 0);
-        capPlusRect.pivot = new Vector2(0, 0);
-        capPlusRect.anchoredPosition = new Vector2(278, 165);
-        capPlusRect.sizeDelta = new Vector2(56, 48);
-        SetCloneText(capPlus, label, "+");
-
-        var round = Instantiate(ready);
-        round.name = "LanRound";
-        round.transform.SetParent(canvas != null ? canvas.transform : root, false);
-        round.transform.SetAsLastSibling();
-        var roundRect = (RectTransform)round.transform;
-        roundRect.anchorMin = roundRect.anchorMax = new Vector2(0, 0);
-        roundRect.pivot = new Vector2(0, 0);
-        roundRect.anchoredPosition = new Vector2(350, 165);
-        roundRect.sizeDelta = new Vector2(190, 48);
-        SetCloneText(round, label, RoundText());
-
-        capMinus.onClick = new Button.ButtonClickedEvent();
-        capMinus.onClick.AddListener(() => SendRoomConfig(capacity - 1, roundSeconds));
-        capPlus.onClick = new Button.ButtonClickedEvent();
-        capPlus.onClick.AddListener(() => SendRoomConfig(capacity + 1, roundSeconds));
-        round.onClick = new Button.ButtonClickedEvent();
-        round.onClick.AddListener(() =>
+        var settings = MakeFlatButton("LanRoomSettings",
+            canvas != null ? canvas.transform : root, new Vector2(210, 165),
+            new Vector2(190, 48), "房间设置", label.font);
+        settings.onClick.AddListener(() =>
         {
-            var index = System.Array.IndexOf(roundChoices, roundSeconds);
-            SendRoomConfig(capacity, roundChoices[(index + 1) % roundChoices.Length]);
+            if (!view.configOpen)
+            {
+                view.configOpen = true;
+                view.configCap = capacity > 0 ? capacity : 2;
+                view.configRound = roundSeconds > 0 ? roundSeconds : roundChoices[0];
+                view.configMessage = string.Empty;
+            }
         });
-        view.capMinusButton = capMinus;
-        view.capPlusButton = capPlus;
-        view.roundButton = round;
+        view.settingsButton = settings;
 
         view.Update();
         var scoreboard = new GameObject("LanScoreboard");
@@ -236,17 +206,8 @@ public sealed class LanRoomUI : MonoBehaviour
         if (renameButton != null)
             renameButton.gameObject.SetActive(capacity > 0 && !started);
         var configVisible = capacity > 0 && !started && isOwner;
-        if (capMinusButton != null)
-            capMinusButton.gameObject.SetActive(configVisible);
-        if (capPlusButton != null)
-            capPlusButton.gameObject.SetActive(configVisible);
-        if (roundButton != null)
-        {
-            roundButton.gameObject.SetActive(configVisible);
-            var roundText = roundButton.transform.Find("RenameText");
-            if (roundText != null && roundText.GetComponent<Text>() != null)
-                roundText.GetComponent<Text>().text = RoundText();
-        }
+        if (settingsButton != null)
+            settingsButton.gameObject.SetActive(configVisible);
         if (capacity > 0 && !started && Input.GetKeyDown(KeyCode.F2))
         {
             renaming = true;
@@ -277,8 +238,9 @@ public sealed class LanRoomUI : MonoBehaviour
         var caption = started
             ? "\u672c\u5c40\u8fdb\u884c\u4e2d"
             : (isReady ? "\u5339\u914d\u4e2d" + new string('.', 1 + (int)(Time.unscaledTime * 3) % 3) : "\u7b49\u5f85\u51c6\u5907");
-        statusLabel.text = started ? caption : string.Format("{0}  {1}/{2} \u4eba\u51c6\u5907  (\u4e0a\u9650 {3})  回合 {4}s",
-                                                           caption, readyCount, memberCount, capacity, roundSeconds);
+        statusLabel.text = started ? caption : string.Format("{0}  {1}/{2} \u4eba\u51c6\u5907  (\u4e0a\u9650 {3}){4}",
+                                                           caption, readyCount, memberCount, capacity,
+                                                           roundSeconds > 0 ? "  回合 " + roundSeconds + "s" : "");
         if (memberLabel != null)
         {
             if (capacity == 0 || started || listedCount == 0)
@@ -355,36 +317,75 @@ public sealed class LanRoomUI : MonoBehaviour
             renaming = false;
             renameMessage = string.Empty;
         }
-    }
 
-    private static string RoundText()
-    {
-        return "回合 " + roundSeconds + "s";
-    }
-
-    private static void SetCloneText(Button clone, Text label, string value)
-    {
-        var oldText = clone.transform.Find("Text");
-        if (oldText != null)
+        if (!configOpen)
+            return;
+        var cbox = new Rect((Screen.width - 430) / 2, (Screen.height - 300) / 2, 430, 300);
+        GUI.Box(cbox, "房间设置");
+        GUI.Label(new Rect(cbox.x + 24, cbox.y + 54, 120, 30), "人数上限");
+        if (GUI.Button(new Rect(cbox.x + 160, cbox.y + 50, 44, 32), "-"))
+            configCap = Mathf.Max(2, configCap - 1);
+        GUI.Label(new Rect(cbox.x + 216, cbox.y + 54, 60, 30), configCap.ToString());
+        if (GUI.Button(new Rect(cbox.x + 280, cbox.y + 50, 44, 32), "+"))
+            configCap = Mathf.Min(8, configCap + 1);
+        GUI.Label(new Rect(cbox.x + 24, cbox.y + 100, 120, 30), "回合时长");
+        if (GUI.Button(new Rect(cbox.x + 160, cbox.y + 96, 44, 32), "<"))
+            configRound = RoundChoice(configRound, -1);
+        GUI.Label(new Rect(cbox.x + 216, cbox.y + 100, 60, 30), configRound + "s");
+        if (GUI.Button(new Rect(cbox.x + 280, cbox.y + 96, 44, 32), ">"))
+            configRound = RoundChoice(configRound, 1);
+        GUI.Label(new Rect(cbox.x + 24, cbox.y + 140, 382, 30),
+            "人数 2-8，回合 30-600s；下一局生效" +
+            (roundSeconds > 0 ? "" : "（服务器现在用默认时长）"));
+        if (configMessage.Length > 0)
+            GUI.Label(new Rect(cbox.x + 24, cbox.y + 172, 382, 28), configMessage);
+        if (GUI.Button(new Rect(cbox.x + 100, cbox.y + 210, 110, 36), "应用"))
         {
-            var old = oldText.GetComponent<Text>();
-            if (old != null)
-                old.text = "";
+            SendRoomConfig(configCap, configRound);
+            configMessage = "已发送，下一局生效";
         }
-        var text = Instantiate(label);
-        text.name = "RenameText";
-        text.transform.SetParent(clone.transform, false);
-        text.rectTransform.anchorMin = Vector2.zero;
-        text.rectTransform.anchorMax = Vector2.one;
-        text.rectTransform.offsetMin = Vector2.zero;
-        text.rectTransform.offsetMax = Vector2.zero;
-        text.text = value;
-        text.font = label.font;
-        text.fontSize = 24;
-        text.color = label.color;
-        text.alignment = TextAnchor.MiddleCenter;
-        text.raycastTarget = false;
-        text.enabled = true;
+        if (GUI.Button(new Rect(cbox.x + 240, cbox.y + 210, 110, 36), "关闭"))
+        {
+            configOpen = false;
+            configMessage = string.Empty;
+        }
+    }
+
+    private static Button MakeFlatButton(string name, Transform parent,
+        Vector2 position, Vector2 size, string text, Font font)
+    {
+        var go = new GameObject(name, typeof(RectTransform), typeof(Image), typeof(Button));
+        go.transform.SetParent(parent, false);
+        var rect = (RectTransform)go.transform;
+        rect.anchorMin = rect.anchorMax = new Vector2(0, 0);
+        rect.pivot = new Vector2(0, 0);
+        rect.anchoredPosition = position;
+        rect.sizeDelta = size;
+        go.GetComponent<Image>().color = new Color(0f, 0f, 0f, 0.6f);
+        var textGo = new GameObject("Text", typeof(RectTransform), typeof(Text));
+        textGo.transform.SetParent(go.transform, false);
+        var textRect = (RectTransform)textGo.transform;
+        textRect.anchorMin = Vector2.zero;
+        textRect.anchorMax = Vector2.one;
+        textRect.offsetMin = Vector2.zero;
+        textRect.offsetMax = Vector2.zero;
+        var textLabel = textGo.GetComponent<Text>();
+        textLabel.font = font;
+        textLabel.fontSize = 22;
+        textLabel.color = Color.white;
+        textLabel.alignment = TextAnchor.MiddleCenter;
+        textLabel.raycastTarget = false;
+        textLabel.text = text;
+        return go.GetComponent<Button>();
+    }
+
+    private static int RoundChoice(int current, int step)
+    {
+        var index = System.Array.IndexOf(roundChoices, current);
+        if (index < 0)
+            index = 0;
+        index = (index + step + roundChoices.Length) % roundChoices.Length;
+        return roundChoices[index];
     }
 
     private static void SendRoomConfig(int cap, int seconds)
