@@ -172,7 +172,7 @@ class ConnectionLifecycleTests(unittest.IsolatedAsyncioTestCase):
         receive.logged_in = False
 
         real_timeout = server.LOBBY_SILENCE_TIMEOUT
-        server.LOBBY_SILENCE_TIMEOUT = 0.5
+        server.LOBBY_SILENCE_TIMEOUT = 2.0
         try:
             with patch.object(server, "receive", receive):
                 task = asyncio.create_task(match.world(None, writer))

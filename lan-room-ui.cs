@@ -29,10 +29,10 @@ public sealed class LanRoomUI : MonoBehaviour
     private string editName = string.Empty;
     private string renameMessage = string.Empty;
     private Button settingsButton;
-    private bool configOpen;
-    private int configCap;
-    private int configRound;
-    private string configMessage = string.Empty;
+    private static bool configOpen;
+    private static int configCap;
+    private static int configRound;
+    private static string configMessage = string.Empty;
     private static readonly int[] roundChoices = { 60, 120, 300, 30 };
     private static int roundSeconds;   // 0 = the server default, not overridden here
 
@@ -51,6 +51,8 @@ public sealed class LanRoomUI : MonoBehaviour
     {
         readyCount = memberCount = capacity = 0;
         isReady = isOwner = started = false;
+        roundSeconds = 0;
+        configOpen = false;
         listedCount = 0;
         Array.Clear(memberNames, 0, memberNames.Length);
         Array.Clear(memberReady, 0, memberReady.Length);
@@ -75,6 +77,21 @@ public sealed class LanRoomUI : MonoBehaviour
             memberOwner[i] = reader.ReadBoolean();
             var length = reader.ReadUInt16();
             memberNames[i] = Encoding.Unicode.GetString(reader.ReadBytes(length));
+        }
+    }
+
+    // The server echoes ROOM_CONFIG_STATE (215) at login and after every
+    // accepted config; this is the only source the client trusts for the
+    // current cap and round length - SendRoomConfig never assumes success.
+    public static void ReceiveConfig(BinaryReader reader)
+    {
+        capacity = reader.ReadUInt16();
+        roundSeconds = reader.ReadUInt16();
+        if (configOpen)
+        {
+            configCap = capacity;
+            configRound = roundSeconds;
+            configMessage = "已应用，下一局生效";
         }
     }
 
@@ -151,12 +168,12 @@ public sealed class LanRoomUI : MonoBehaviour
             new Vector2(190, 48), "房间设置", label.font);
         settings.onClick.AddListener(() =>
         {
-            if (!view.configOpen)
+            if (!configOpen)
             {
-                view.configOpen = true;
-                view.configCap = capacity > 0 ? capacity : 2;
-                view.configRound = roundSeconds > 0 ? roundSeconds : roundChoices[0];
-                view.configMessage = string.Empty;
+                configOpen = true;
+                configCap = capacity > 0 ? capacity : 2;
+                configRound = roundSeconds > 0 ? roundSeconds : roundChoices[0];
+                configMessage = string.Empty;
             }
         });
         view.settingsButton = settings;
@@ -237,6 +254,7 @@ public sealed class LanRoomUI : MonoBehaviour
     private void OnDisable()
     {
         renaming = false;
+        configOpen = false;
         if (renameButton != null)
             renameButton.gameObject.SetActive(false);
     }
@@ -366,7 +384,6 @@ public sealed class LanRoomUI : MonoBehaviour
     {
         if (cap < 2 || cap > 8 || seconds < 30 || seconds > 600)
             return;
-        roundSeconds = seconds;
         try
         {
             var type = Type.GetType("CS.WorldServerProxy, Assembly-CSharp");

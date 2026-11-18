@@ -122,6 +122,7 @@ ROOM_STATE = 210
 BATTLE_END = 41
 BATTLE_CLOSE = 43
 ROOM_CONFIG = 212
+ROOM_CONFIG_STATE = 215
 SCOREBOARD = 216
 ROOM_START = 211
 LAST_WEAPON = 212
@@ -575,9 +576,13 @@ class Match(asyncio.DatagramProtocol):
     # class-level defaults so Match.__new__-built test objects stay valid
     force_ready = frozenset()
     force_ready_loop_task = None
+    round_time = ROUND_TIME
 
     def __init__(self, host, size, stock_vehicles=False, owner_profile=None):
         self.host = host
+        # slots never changes (what the server was started with); size is
+        # the current player cap the owner may retarget via ROOM_CONFIG
+        self.slots = size
         self.size = size
         self.owner_profile = owner_profile.casefold() if owner_profile else None
         self.players = {}
@@ -715,6 +720,7 @@ class Match(asyncio.DatagramProtocol):
             "battle_id": self.battle_id,
             "round_time": self.round_time,
             "size": self.size,
+            "slots": self.slots,
             "owner": self.owner.id if self.owner else None,
             "players": [
                 {
@@ -909,6 +915,7 @@ class Match(asyncio.DatagramProtocol):
         if self.force_ready and not self.force_ready_loop_task:
             self.force_ready_loop_task = asyncio.create_task(self.force_ready_loop())
         self.send_room_state()
+        await send(writer, ROOM_CONFIG_STATE, struct.pack("<HH", self.size, int(self.round_time)))
         while True:
             try:
                 message, payload = await asyncio.wait_for(
@@ -954,20 +961,29 @@ class Match(asyncio.DatagramProtocol):
                         and all(p.room_ready for p in self.players.values())):
                     asyncio.get_running_loop().call_later(1.0, self.start_room, self.owner)
             elif message == ROOM_CONFIG and len(payload) == 4:
-                # v0.13.0 custom rooms: the owner may retarget the player cap
-                # (never above the slots the server was started with) and the
-                # round length; both are server-authoritative and take effect
-                # from the next room start
+                # v1.0.0 custom rooms: the owner may retarget the player cap
+                # and the round length; server-authoritative, next-round only.
+                # A running round locks both: the timer already started and
+                # the queued lineup must not shrink mid-match.
                 max_players, round_seconds = struct.unpack_from("<HH", payload)
                 if player is not self.owner:
                     print(f"room config rejected: player {player.id} is not the owner", flush=True)
-                elif not (2 <= max_players <= self.size and 30 <= round_seconds <= 600):
-                    print(f"room config rejected: cap {max_players} round {round_seconds}s out of range", flush=True)
+                elif self.queued:
+                    print(f"room config rejected: a round is running", flush=True)
+                elif not (2 <= max_players <= self.slots):
+                    print(f"room config rejected: cap {max_players} outside 2..{self.slots} slots", flush=True)
+                elif max_players < len(self.lobby_members()):
+                    print(f"room config rejected: cap {max_players} below {len(self.lobby_members())} present players", flush=True)
+                elif not (30 <= round_seconds <= 600):
+                    print(f"room config rejected: round {round_seconds}s outside 30..600", flush=True)
                 else:
                     self.size = max_players
                     self.round_time = float(round_seconds)
                     print(f"room config: cap {self.size} round {self.round_time:.0f}s by player {player.id}", flush=True)
                     self.send_room_state()
+                    state = frame(ROOM_CONFIG_STATE, struct.pack("<HH", self.size, int(self.round_time)))
+                    for member in self.lobby_members():
+                        member.world.write(state)
             elif message == ROOM_START and not payload:
                 self.start_room(player)
 

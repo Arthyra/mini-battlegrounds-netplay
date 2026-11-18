@@ -909,6 +909,10 @@ internal static class PatchCombat
             il.Create(OpCodes.Bne_Un, message), il.Create(OpCodes.Ldloc_1),
             il.Create(OpCodes.Call, module.ImportReference(Method(room, "Receive", "System.IO.BinaryReader"))),
             il.Create(OpCodes.Ret));
+        Before(il, message, il.Create(OpCodes.Ldloc_3), il.Create(OpCodes.Ldc_I4, 215),
+            il.Create(OpCodes.Bne_Un, message), il.Create(OpCodes.Ldloc_1),
+            il.Create(OpCodes.Call, module.ImportReference(Method(room, "ReceiveConfig", "System.IO.BinaryReader"))),
+            il.Create(OpCodes.Ret));
         var login = Method(world, "HandleLogin", "System.IO.BinaryReader");
         il = login.Body.GetILProcessor();
         il.InsertBefore(login.Body.Instructions[0],
