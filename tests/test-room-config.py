@@ -7,8 +7,9 @@ v0.13.0 custom rooms, server-authoritative:
     configs broadcast nothing, which the test uses as the rejection signal
   - the next room start uses the configured cap and round length
 
-Requires an externally started server with MBG_TEST_AUTOSTART=1 (default
-round 120s or longer) and ports 43120-43135 free.
+Requires an externally started server with MBG_TEST_AUTOSTART=1,
+MBG_ROUND_TIME=120 and --players 4 (so a cap change to 3 is legal)
+and ports 43120-43135 free.
 
 Usage:
   python tests/test-room-config.py
@@ -73,10 +74,11 @@ if __name__ == "__main__":
     drain(a, 1.0)  # the login-time room state
     drain(b, 1.0)
 
-    # 1. owner sets a valid config; a fresh 210 must arrive with the cap
-    a.sendall(config_packet(2, 30))
+    # 1. owner narrows the cap 4 -> 3 and shortens the round; the fresh
+    #    210 must carry the new cap
+    a.sendall(config_packet(3, 30))
     cap = room_state_broadcast(a)
-    if cap == 2:
+    if cap == 3:
         print("owner config accepted: cap", cap)
     else:
         print("owner config failed:", cap)
@@ -92,7 +94,7 @@ if __name__ == "__main__":
         failures.append("non-owner accepted")
 
     # 3. out-of-range caps and round lengths: no 210 may follow
-    a.sendall(config_packet(9, 30))   # above the 2 slots the server started with
+    a.sendall(config_packet(9, 30))   # above the 4 slots the server started with
     cap = room_state_broadcast(a)
     if cap is None:
         print("over-slot cap rejected")
@@ -109,10 +111,10 @@ if __name__ == "__main__":
 
     # 4. the configured 30s round must take effect: start, load, and expect
     #    BATTLE_CLOSE ~38s after the round starts (30s + 8s result delay),
-    #    far sooner than the server default 120s
-    a.sendall(config_packet(2, 30))
+    #    far sooner than the server default 120s; the cap stays 3
+    a.sendall(config_packet(3, 30))
     cap = room_state_broadcast(a)
-    if cap != 2:
+    if cap != 3:
         failures.append("final config failed")
     base.ready(a)
     base.ready(b)

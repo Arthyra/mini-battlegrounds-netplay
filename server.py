@@ -622,6 +622,11 @@ class Match(asyncio.DatagramProtocol):
         # isolated-test helper: keep the named profiles ready so mixed
         # protocol-client + real-client GUI sessions cycle rounds without
         # synthetic mouse clicks. Explicit MBG_TEST_FORCE_READY only.
+        delay = float(os.environ.get("MBG_TEST_FORCE_READY_DELAY", "0"))
+        if delay > 0:
+            # hold the first auto-start back so a real owner client can open
+            # the config controls in the lobby before the round begins
+            await asyncio.sleep(delay)
         while True:
             await asyncio.sleep(1.0)
             if self.queued or len(self.players) < 2:

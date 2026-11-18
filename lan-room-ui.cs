@@ -28,6 +28,11 @@ public sealed class LanRoomUI : MonoBehaviour
     private bool renaming;
     private string editName = string.Empty;
     private string renameMessage = string.Empty;
+    private Button capMinusButton;
+    private Button capPlusButton;
+    private Button roundButton;
+    private static readonly int[] roundChoices = { 60, 120, 300, 30 };
+    private static int roundSeconds = 120;
 
     public static string GetLoginHost(string fallback)
     {
@@ -169,6 +174,53 @@ public sealed class LanRoomUI : MonoBehaviour
         });
         view.renameButton = rename;
 
+        var capMinus = Instantiate(ready);
+        capMinus.name = "LanCapMinus";
+        capMinus.transform.SetParent(canvas != null ? canvas.transform : root, false);
+        capMinus.transform.SetAsLastSibling();
+        var capMinusRect = (RectTransform)capMinus.transform;
+        capMinusRect.anchorMin = capMinusRect.anchorMax = new Vector2(0, 0);
+        capMinusRect.pivot = new Vector2(0, 0);
+        capMinusRect.anchoredPosition = new Vector2(210, 165);
+        capMinusRect.sizeDelta = new Vector2(56, 48);
+        SetCloneText(capMinus, label, "-");
+
+        var capPlus = Instantiate(ready);
+        capPlus.name = "LanCapPlus";
+        capPlus.transform.SetParent(canvas != null ? canvas.transform : root, false);
+        capPlus.transform.SetAsLastSibling();
+        var capPlusRect = (RectTransform)capPlus.transform;
+        capPlusRect.anchorMin = capPlusRect.anchorMax = new Vector2(0, 0);
+        capPlusRect.pivot = new Vector2(0, 0);
+        capPlusRect.anchoredPosition = new Vector2(278, 165);
+        capPlusRect.sizeDelta = new Vector2(56, 48);
+        SetCloneText(capPlus, label, "+");
+
+        var round = Instantiate(ready);
+        round.name = "LanRound";
+        round.transform.SetParent(canvas != null ? canvas.transform : root, false);
+        round.transform.SetAsLastSibling();
+        var roundRect = (RectTransform)round.transform;
+        roundRect.anchorMin = roundRect.anchorMax = new Vector2(0, 0);
+        roundRect.pivot = new Vector2(0, 0);
+        roundRect.anchoredPosition = new Vector2(350, 165);
+        roundRect.sizeDelta = new Vector2(190, 48);
+        SetCloneText(round, label, RoundText());
+
+        capMinus.onClick = new Button.ButtonClickedEvent();
+        capMinus.onClick.AddListener(() => SendRoomConfig(capacity - 1, roundSeconds));
+        capPlus.onClick = new Button.ButtonClickedEvent();
+        capPlus.onClick.AddListener(() => SendRoomConfig(capacity + 1, roundSeconds));
+        round.onClick = new Button.ButtonClickedEvent();
+        round.onClick.AddListener(() =>
+        {
+            var index = System.Array.IndexOf(roundChoices, roundSeconds);
+            SendRoomConfig(capacity, roundChoices[(index + 1) % roundChoices.Length]);
+        });
+        view.capMinusButton = capMinus;
+        view.capPlusButton = capPlus;
+        view.roundButton = round;
+
         view.Update();
         var scoreboard = new GameObject("LanScoreboard");
         DontDestroyOnLoad(scoreboard);
@@ -183,11 +235,38 @@ public sealed class LanRoomUI : MonoBehaviour
         startButton.interactable = isReady && !started;
         if (renameButton != null)
             renameButton.gameObject.SetActive(capacity > 0 && !started);
+        var configVisible = capacity > 0 && !started && isOwner;
+        if (capMinusButton != null)
+            capMinusButton.gameObject.SetActive(configVisible);
+        if (capPlusButton != null)
+            capPlusButton.gameObject.SetActive(configVisible);
+        if (roundButton != null)
+        {
+            roundButton.gameObject.SetActive(configVisible);
+            var roundText = roundButton.transform.Find("RenameText");
+            if (roundText != null && roundText.GetComponent<Text>() != null)
+                roundText.GetComponent<Text>().text = RoundText();
+        }
         if (capacity > 0 && !started && Input.GetKeyDown(KeyCode.F2))
         {
             renaming = true;
             editName = string.Empty;
             renameMessage = string.Empty;
+        }
+        if (configVisible)
+        {
+            // keyboard shortcuts for the config controls: synthetic mouse
+            // clicks are unreliable on this DPI/multi-monitor layout, while
+            // Input.GetKeyDown reads the global keyboard state
+            if (Input.GetKeyDown(KeyCode.F3))
+                SendRoomConfig(capacity + 1, roundSeconds);
+            if (Input.GetKeyDown(KeyCode.F5))
+                SendRoomConfig(capacity - 1, roundSeconds);
+            if (Input.GetKeyDown(KeyCode.F4))
+            {
+                var index = System.Array.IndexOf(roundChoices, roundSeconds);
+                SendRoomConfig(capacity, roundChoices[(index + 1) % roundChoices.Length]);
+            }
         }
         readyLabel.text = isReady ? "\u53d6\u6d88\u51c6\u5907" : "\u51c6\u5907";
         if (capacity == 0)
@@ -198,8 +277,8 @@ public sealed class LanRoomUI : MonoBehaviour
         var caption = started
             ? "\u672c\u5c40\u8fdb\u884c\u4e2d"
             : (isReady ? "\u5339\u914d\u4e2d" + new string('.', 1 + (int)(Time.unscaledTime * 3) % 3) : "\u7b49\u5f85\u51c6\u5907");
-        statusLabel.text = started ? caption : string.Format("{0}  {1}/{2} \u4eba\u51c6\u5907  (\u4e0a\u9650 {3})",
-                                                           caption, readyCount, memberCount, capacity);
+        statusLabel.text = started ? caption : string.Format("{0}  {1}/{2} \u4eba\u51c6\u5907  (\u4e0a\u9650 {3})  回合 {4}s",
+                                                           caption, readyCount, memberCount, capacity, roundSeconds);
         if (memberLabel != null)
         {
             if (capacity == 0 || started || listedCount == 0)
@@ -275,6 +354,65 @@ public sealed class LanRoomUI : MonoBehaviour
         {
             renaming = false;
             renameMessage = string.Empty;
+        }
+    }
+
+    private static string RoundText()
+    {
+        return "回合 " + roundSeconds + "s";
+    }
+
+    private static void SetCloneText(Button clone, Text label, string value)
+    {
+        var oldText = clone.transform.Find("Text");
+        if (oldText != null)
+        {
+            var old = oldText.GetComponent<Text>();
+            if (old != null)
+                old.text = "";
+        }
+        var text = Instantiate(label);
+        text.name = "RenameText";
+        text.transform.SetParent(clone.transform, false);
+        text.rectTransform.anchorMin = Vector2.zero;
+        text.rectTransform.anchorMax = Vector2.one;
+        text.rectTransform.offsetMin = Vector2.zero;
+        text.rectTransform.offsetMax = Vector2.zero;
+        text.text = value;
+        text.font = label.font;
+        text.fontSize = 24;
+        text.color = label.color;
+        text.alignment = TextAnchor.MiddleCenter;
+        text.raycastTarget = false;
+        text.enabled = true;
+    }
+
+    private static void SendRoomConfig(int cap, int seconds)
+    {
+        if (cap < 2 || cap > 8 || seconds < 30 || seconds > 600)
+            return;
+        roundSeconds = seconds;
+        try
+        {
+            var type = Type.GetType("CS.WorldServerProxy, Assembly-CSharp");
+            if (type == null)
+            {
+                foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+                {
+                    type = assembly.GetType("CS.WorldServerProxy");
+                    if (type != null)
+                        break;
+                }
+            }
+            if (type == null)
+                return;
+            var method = type.GetMethod("SendLanRoomConfigValue", BindingFlags.Public | BindingFlags.Static,
+                null, new[] { typeof(ushort), typeof(ushort) }, null);
+            if (method != null)
+                method.Invoke(null, new object[] { (ushort)cap, (ushort)seconds });
+        }
+        catch (Exception)
+        {
         }
     }
 

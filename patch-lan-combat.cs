@@ -1144,6 +1144,39 @@ internal static class PatchCombat
         valueIl.Emit(OpCodes.Callvirt, Method(module.GetType("CS.TcpPeer"), "Send", "System.Byte[]"));
         valueIl.Append(valueRet);
 
+        // LanRoomUI calls this through reflection when the room owner adjusts
+        // the player cap or the round length (v0.13.0 ROOM_CONFIG 212).
+        var sendConfig = new MethodDefinition("SendLanRoomConfigValue",
+            MethodAttributes.Public | MethodAttributes.Static, core.Void);
+        sendConfig.Parameters.Add(new ParameterDefinition("cap", ParameterAttributes.None, core.UInt16));
+        sendConfig.Parameters.Add(new ParameterDefinition("seconds", ParameterAttributes.None, core.UInt16));
+        world.Methods.Add(sendConfig);
+        var configData = new VariableDefinition(packet);
+        sendConfig.Body.Variables.Add(configData);
+        var configIl = sendConfig.Body.GetILProcessor();
+        var configRet = configIl.Create(OpCodes.Ret);
+        configIl.Emit(OpCodes.Ldarg_0);
+        configIl.Emit(OpCodes.Brfalse, configRet);
+        configIl.Emit(OpCodes.Newobj, Method(packet, ".ctor"));
+        configIl.Emit(OpCodes.Stloc, configData);
+        configIl.Emit(OpCodes.Ldloc, configData);
+        configIl.Emit(OpCodes.Ldc_I4, 212);
+        configIl.Emit(OpCodes.Callvirt, Method(packet, "Push", "System.UInt16"));
+        configIl.Emit(OpCodes.Ldloc, configData);
+        configIl.Emit(OpCodes.Ldarg_0);
+        configIl.Emit(OpCodes.Callvirt, Method(packet, "Push", "System.UInt16"));
+        configIl.Emit(OpCodes.Ldloc, configData);
+        configIl.Emit(OpCodes.Ldarg_1);
+        configIl.Emit(OpCodes.Callvirt, Method(packet, "Push", "System.UInt16"));
+        configIl.Emit(OpCodes.Ldloc, configData);
+        configIl.Emit(OpCodes.Callvirt, Method(packet, "UpdateHeader"));
+        configIl.Emit(OpCodes.Call, Method(proxy, "get_Instance"));
+        configIl.Emit(OpCodes.Callvirt, Method(proxy, "GetWorldServerProxy"));
+        configIl.Emit(OpCodes.Ldloc, configData);
+        configIl.Emit(OpCodes.Callvirt, Method(module.GetType("CS.NetBuffer"), "get_Base"));
+        configIl.Emit(OpCodes.Callvirt, Method(module.GetType("CS.TcpPeer"), "Send", "System.Byte[]"));
+        configIl.Append(configRet);
+
         var login = Method(world, "HandleLogin", "System.IO.BinaryReader");
         var ping = login.Body.Instructions.Single(i => i.OpCode == OpCodes.Call &&
             ((MethodReference)i.Operand).Name == "SetPingEnabled");
