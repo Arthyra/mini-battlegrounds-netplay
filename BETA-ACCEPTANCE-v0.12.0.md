@@ -1,6 +1,15 @@
 # v0.12.0 LAN Beta — 候选版本验收结论（不公开发布）
 
-**已发布：v0.12.0（2026-11-18，commit `c2766f4`，干净克隆构建）**
+**已发布：v1.0.0（2026-11-19，commit `8625eaa`，功能定版）**
+- Release：`lan-player-v1.0.0`（附件下载复验一致）
+- owner：`bba5845e1df7018e2d88e44300aef9d80acb996cdf812121f8cff18dbe47e365`
+- join：`cd072a99419b1c8bbe0e5b77c44d50dd46baf5bc5bdcf7eeb0595900d2351731`
+- 房主自定义房间端到端（cap/round + 215 确认帧 + UI 弹窗）；cap 3->2->3
+  往返、对局中锁定、开局名单截断均已实测；21 轮内存无泄漏证据
+- 名牌 NRE 与物理双机验收保持为已知限制
+
+**历史发布**：v0.12.0（c2766f4，owner 67ea85ed… / join 94b8b173…）
+**已作废候选**：`188434f`、`7067c87`、`72127a4`（见下）
 - Release：`lan-player-v0.12.0`（GitHub Release，附件哈希已下载复验一致）
 - owner `Mini-Battlegrounds-LAN-Windows.zip`：`67ea85ed5c4cb9b6969355bee52a45b0675f7ff32fdbdd916d05f38f72c11cae`
 - join `Mini-Battlegrounds-LAN-Windows-join.zip`：`94b8b173fa7827f69b561d3184b9a0885b43909f03864fbc7fa9c250b1afe200`
