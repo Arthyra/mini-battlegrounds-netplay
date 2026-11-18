@@ -167,7 +167,7 @@ class ConnectionLifecycleTests(unittest.IsolatedAsyncioTestCase):
             if not receive.logged_in:
                 receive.logged_in = True
                 return 23, struct.pack("<II", owner.id, 77)
-            await asyncio.sleep(0.1)  # pings well inside the timeout
+            await asyncio.sleep(0.4)  # pings well inside the timeout
             return 1, struct.pack("<f", 0.0)
         receive.logged_in = False
 
@@ -177,7 +177,7 @@ class ConnectionLifecycleTests(unittest.IsolatedAsyncioTestCase):
             with patch.object(server, "receive", receive):
                 task = asyncio.create_task(match.world(None, writer))
                 try:
-                    await asyncio.sleep(2.0)  # 4x the timeout, pings keep coming
+                    await asyncio.sleep(8.0)  # 4x the timeout, pings keep coming
                     self.assertFalse(task.done())
                     self.assertIs(match.owner, owner)
                 finally:
