@@ -293,7 +293,7 @@ public sealed class LanRoomUI : MonoBehaviour
 
         if (!configOpen)
             return;
-        var cbox = new Rect((Screen.width - 430) / 2, (Screen.height - 300) / 2, 430, 300);
+        var cbox = new Rect((Screen.width - 440) / 2, (Screen.height - 360) / 2, 440, 360);
         GUI.Box(cbox, "房间设置");
         GUI.Label(new Rect(cbox.x + 24, cbox.y + 54, 120, 30), "人数上限");
         if (GUI.Button(new Rect(cbox.x + 160, cbox.y + 50, 44, 32), "-"))
@@ -307,17 +307,18 @@ public sealed class LanRoomUI : MonoBehaviour
         GUI.Label(new Rect(cbox.x + 216, cbox.y + 100, 60, 30), configRound + "s");
         if (GUI.Button(new Rect(cbox.x + 280, cbox.y + 96, 44, 32), ">"))
             configRound = RoundChoice(configRound, 1);
-        GUI.Label(new Rect(cbox.x + 24, cbox.y + 140, 382, 30),
-            "人数 2-8，回合 30-600s；下一局生效" +
-            (roundSeconds > 0 ? "" : "（服务器现在用默认时长）"));
+        GUI.Label(new Rect(cbox.x + 24, cbox.y + 142, 392, 46),
+            "人数 2-8；回合 30-600s；下一局生效\n" +
+            (roundSeconds > 0 ? "当前已应用 " + roundSeconds + "s"
+                              : "服务器现在用默认时长"));
         if (configMessage.Length > 0)
-            GUI.Label(new Rect(cbox.x + 24, cbox.y + 172, 382, 28), configMessage);
-        if (GUI.Button(new Rect(cbox.x + 100, cbox.y + 210, 110, 36), "应用"))
+            GUI.Label(new Rect(cbox.x + 24, cbox.y + 196, 392, 28), configMessage);
+        if (GUI.Button(new Rect(cbox.x + 105, cbox.y + 240, 110, 36), "应用"))
         {
             SendRoomConfig(configCap, configRound);
             configMessage = "已发送，下一局生效";
         }
-        if (GUI.Button(new Rect(cbox.x + 240, cbox.y + 210, 110, 36), "关闭"))
+        if (GUI.Button(new Rect(cbox.x + 245, cbox.y + 240, 110, 36), "关闭"))
         {
             configOpen = false;
             configMessage = string.Empty;
