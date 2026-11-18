@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Reflection;
 internal static class UpdatePolicyTests
@@ -12,6 +13,7 @@ internal static class UpdatePolicyTests
     {
         try
         {
+            bool live = Array.IndexOf(args, "--live") >= 0;
             ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
             type = Assembly.LoadFrom(Path.GetFullPath(args[0])).GetType("Launcher");
             if(type == null) type = Array.Find(Assembly.LoadFrom(Path.GetFullPath(args[0])).GetTypes(), t => t.GetMethod("VerifyUpdateManifest", BindingFlags.NonPublic | BindingFlags.Static) != null);
@@ -21,14 +23,32 @@ internal static class UpdatePolicyTests
             Check(!request.AllowAutoRedirect, "redirects cannot downgrade transport");
             try { Call("UpdateRequest", "http://127.0.0.1:1/latest.json", 30); throw new Exception("HTTP accepted"); }
             catch(TargetInvocationException e) { Check(e.InnerException is InvalidDataException, "HTTP rejected before network request"); }
-            var info = Call("FetchUpdateFrom", "https://198.51.100.10/mbg-update/latest.json");
-            Check((bool)Call("VerifyUpdateManifest", info), "real ECS RSA-SHA256 manifest signature accepted");
-            var fields = info.GetType();
-            fields.GetField("Signature").SetValue(info, "AAAA");
-            Check(!(bool)Call("VerifyUpdateManifest", info), "forged signature rejected");
-            info = Call("FetchUpdateFrom", "https://198.51.100.10:8445/mbg-update/latest.json");
-            fields.GetField("Url").SetValue(info, "http://198.51.100.10:8080/update/client.zip");
-            Check(!(bool)Call("VerifyUpdateManifest", info), "HTTP package URL rejected");
+
+            // Local rejects on a synthetic manifest: these hold regardless of
+            // what the production mirror currently serves.
+            var synthetic = Activator.CreateInstance(type.Assembly.GetTypes().First(t => t.GetField("Signature") != null && t.GetField("Url") != null));
+            var fields = synthetic.GetType();
+            fields.GetField("Signature").SetValue(synthetic, "AAAA");
+            Check(!(bool)Call("VerifyUpdateManifest", synthetic), "forged signature rejected");
+            fields.GetField("Url").SetValue(synthetic, "http://198.51.100.10:8080/update/client.zip");
+            Check(!(bool)Call("VerifyUpdateManifest", synthetic), "HTTP package URL rejected");
+
+            // The live fetches assert against the PRODUCTION mirror and are
+            // opt-in: a deployment, cleanup or outage there must not fail CI.
+            if (live)
+            {
+                var info = Call("FetchUpdateFrom", "https://198.51.100.10/mbg-update/latest.json");
+                Check((bool)Call("VerifyUpdateManifest", info), "real ECS RSA-SHA256 manifest signature accepted");
+                fields.GetField("Signature").SetValue(info, "AAAA");
+                Check(!(bool)Call("VerifyUpdateManifest", info), "forged signature rejected (live)");
+                info = Call("FetchUpdateFrom", "https://198.51.100.10:8445/mbg-update/latest.json");
+                fields.GetField("Url").SetValue(info, "http://198.51.100.10:8080/update/client.zip");
+                Check(!(bool)Call("VerifyUpdateManifest", info), "HTTP package URL rejected (live)");
+            }
+            else
+            {
+                Console.WriteLine("SKIP real-mirror fetches (pass --live to include them)");
+            }
             Check(type.GetMethod("StripZoneMarkers", BindingFlags.NonPublic | BindingFlags.Static) == null, "startup-wide Zone.Identifier removal removed");
             Console.WriteLine(passed + " passed"); return 0;
         }
