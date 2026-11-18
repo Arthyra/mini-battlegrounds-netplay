@@ -873,7 +873,9 @@ class Match(asyncio.DatagramProtocol):
     def start_room(self, owner):
         if owner is not self.owner or not owner.room_ready or self.queued:
             return
-        self.queued = [p for p in self.lobby_members() if p.room_ready]
+        # the owner-configured cap bounds the lineup: ready players beyond
+        # it stay in the lobby for the next round instead of squeezing in
+        self.queued = [p for p in self.lobby_members() if p.room_ready][:self.size]
         for player in self.queued:
             player.reset_for_round(choice(PRIMARY_GUNS))
         self.loading_deadline = time.monotonic() + BATTLE_LOAD_TIMEOUT
