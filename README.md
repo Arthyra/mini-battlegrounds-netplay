@@ -31,6 +31,22 @@
 
 当前私有发布的 Windows 房主包含有 Unity 程序集和预处理的游戏资源。公开候选需要单独核验这些文件的许可，并排除未获公开分发授权的文件。
 
+### 一键安装（已含地图 102 数据的发行版玩家）
+
+拥有含地图 102 数据发行版（4399 渠道最新版）的玩家可以使用一键转换工具，无需 Python、编译器或 Mono.Cecil：
+
+```text
+mbg-lan-mod-setup-<版本>.zip
+  ModSetup.exe                定位/校验游戏 → 复制到独立目录 → 应用补丁 →
+                              安装服务端与启动器（原版文件不被修改）
+  payload\                    补丁工具（Mono.Cecil）、房间 UI、LAN 服务端、
+                              启动器、提取好的运行时数据 JSON
+```
+
+构建安装包（开发者）：`python steam-install/build-installer.py`（产物为 `dist/mbg-lan-mod-setup-<版本>.zip`；包含从原版游戏衍生的补丁 DLL 与提取 数据，因此**只随发布包分发，不进入公开源码仓库**）。
+
+注意：Steam 版（App 658470）是早期版本，**不含地图 102 场景数据且登录形态不同**，转换工具会明确拒绝并说明原因——本项目玩法需要含地图 102 的发行版。安装包中的补丁 DLL 与 JSON 是原游戏的衍生数据，仅与玩家自备的原版文件配套使用，单独分发没有意义。
+
 ### 使用源码运行服务端
 
 需要 Python 3.11+；服务端本体只使用标准库，但启动时读取三个**从原版游戏
@@ -46,9 +62,7 @@ python export-local-data.py
 # 3. 把生成的三个 JSON 复制到服务端运行目录（源码运行即仓库根；打包后为 server/）
 ```
 
-
-
-需要 Python 3.11+、对应版本的已准备客户端及服务端依赖数据。LAN 房主可在项目目录执行：
+随后 LAN 房主可在项目目录执行：
 
 ```powershell
 python server.py --players 8 --share-client --admin-port 0
@@ -103,10 +117,17 @@ DLL 重建会读取仓库 `client/CrazyShooter_Data/Managed/` 下的 Unity/Mono 
 `LanRoomUI.dll`，并运行 IL 检查。`export-local-data.py` 的输入同样来自这个
 目录。完整的权威构建配方见 `AGENTS.md`。
 
-
 ## 测试与版本记录
 
-已解决的改动见 [GitHub Releases](https://github.com/Ash-Rise/mini-battlegrounds-lan/releases) 与 Git Commit；当前网络与场景遗留问题见 [Issue #7](https://github.com/Ash-Rise/mini-battlegrounds-lan/issues/7)、[Issue #8](https://github.com/Ash-Rise/mini-battlegrounds-lan/issues/8)。自动回归在 `tests/`，隔离验收工具在 `tools/`。阶段 Worklog、原始机器日志和详细历史报告不再提交；旧文件仍可通过私有仓库 Git 历史回溯。没有执行的物理双机与网络故障测试不能标记通过。
+自动回归在 `tests/`，隔离验收工具在 `tools/`；已解决的改动见 [GitHub Releases](https://github.com/Ash-Rise/mini-battlegrounds-lan/releases)。没有执行的物理双机与网络故障测试不能标记通过。
+
+## 常见问题排查
+
+- **服务端启动报缺少 JSON 数据文件**：按"使用源码运行服务端"一节用 `export-local-data.py` 从原版客户端提取三个 JSON，并放到 server.exe 同目录。
+- **搜索不到房间**：自动发现使用 UDP 43122 定向广播，只在同一网段可靠； 跨网段（不同路由/热点隔离）需要房主把地址告诉朋友手动加入。 多网卡机器上发现包会覆盖所有上行子网，但隧道/虚拟网卡（VPN、WSL、虚拟机） 可能抢走默认路由，必要时在启动器里手动输入房主 IPv4。
+- **加入失败**：按顺序检查 TCP 43120/43123/43134 与 UDP 43135 是否可达 （Windows 防火墙会拦截未授权的 server.exe——启动器提供放行按钮）。
+- **完全离线启动**：启动器的更新检查在未配置更新服务器时自动跳过， 不会阻塞进入大厅。
+- **连续对局后内存偏高**：属于 Unity 资源缓存高水位，21 轮实测无持续 增长证据；长时间会话后偶发名牌空引用会自愈，不影响联机。
 
 ## 公开发布与资源说明
 

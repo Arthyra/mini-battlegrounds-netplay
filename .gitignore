@@ -63,3 +63,11 @@
 !/build/pyinstaller/*.config
 !/ecs-battle-connect.cs
 !/ecs-diagnostics.cs
+# steam-install build outputs
+steam-install/build/
+steam-install/dist/
+
+!/steam-install/
+/steam-install/*
+!/steam-install/ModSetup.cs
+!/steam-install/build-installer.py
