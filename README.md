@@ -2,12 +2,12 @@
 
 基于 Mini Battlegrounds Windows Steam 版本的非官方联机实验项目，为地图 102 提供独立的房间、战斗和复活玩法。支持 **1～8 人**，使用项目自己的登录身份；**ECS 公网联机**和**局域网直连**共用同一套服务端与战斗协议。
 
-> 这是持续开发中的 Mod，不是原游戏的官方在线服务。仓库以源码和补丁工具为主，不包含完整游戏客户端、原始 APK 或所有资源构建输入。
+> 这是非官方 Mod，v1.0.0 已功能定版，后续仅维护现有功能。仓库以源码和补丁工具为主，不包含完整游戏客户端、原始 APK 或所有资源构建输入。
 
 ## 版本与进展
 
-- **最新正式版：[v1.0.0 — 功能定版：房主自定义房间 + 稳定性收尾](https://github.com/Ash-Rise/mini-battlegrounds-lan/releases/tag/lan-player-v1.0.0)**。房主可在房间内调整人数上限（2-8）与回合时长（30-600s，下一局生效、服务端权威）；修复双开第二客户端卡加载的竞态与上限不可逆问题。owner/join 双包已发布；**ECS 更新镜像部署需单独执行**（更新服务按规范仅在 :8445）。
-- **开发中：v0.12.0 LAN Beta 候选（未发布）**。已完成单机协议与跨网卡发现测试，尚缺两台物理 Windows 的完整对局、断线恢复、离线网络与防火墙验收。详见 [Beta 验收记录](BETA-ACCEPTANCE-v0.12.0.md)。
+- **最新正式版：[v1.0.0 — 功能定版：房主自定义房间 + 稳定性收尾](https://github.com/Ash-Rise/mini-battlegrounds-lan/releases/tag/lan-player-v1.0.0)**。房主可调整人数上限（2–8，受服务器槽位限制），并选择 30、60、120 或 300 秒的回合时长。设置经服务端确认后从下一局生效。本版修复了双开第二客户端卡加载和人数上限调小后无法调回的问题。owner/join 双包已发布。**ECS 更新镜像部署需单独执行**（更新服务按规范仅在 8445 端口）。
+- **历史版本：[v0.12.0](https://github.com/Ash-Rise/mini-battlegrounds-lan/releases/tag/lan-player-v0.12.0)**。单机协议与跨网卡发现测试及剩余验收项见 [LAN 验收记录](BETA-ACCEPTANCE-v0.12.0.md)。
 
 历史修改与安装包统一以 [GitHub Releases](https://github.com/Ash-Rise/mini-battlegrounds-lan/releases) 为准。单机测试通过不等于两台物理电脑或长期稳定性验收；连续重进地图的内存变化仍需测量。
 
@@ -29,7 +29,7 @@
 - **LAN / 局域网**：房主在 Windows 启动器选择“创建局域网房间”；其他玩家选择“搜索局域网房间”或手动填写房主 IPv4。
 - 创建房间需要安装包包含 `server/server.exe`。部分仅供加入的客户端包可能不含服务端；这种包不能开房。
 
-当前玩家包及其部分数据依赖私有、预处理后的游戏资源；本 README **不表示允许公开镜像或再分发这些资源**。
+当前私有发布的 Windows 房主包含有 Unity 程序集和预处理的游戏资源。公开候选需要单独核验这些文件的许可，并排除未获公开分发授权的文件。
 
 ### 使用源码运行服务端
 
@@ -65,7 +65,7 @@ LAN 游戏的数据通信不依赖 ECS。启动器的公网更新检查已缩短
 | `build-friend-zip.py`、`build-release.py` | 从已准备的客户端生成分发包、签名更新清单 |
 | `tests/` | 协议、连接生命周期与更新器回归测试 |
 | `tools/` | 构建输入校验、隔离 ECS 验收与故障注入工具 |
-| `BETA-ACCEPTANCE-v0.12.0.md` | 当前未发布 Beta 的测试记录与未完成项 |
+| `BETA-ACCEPTANCE-v0.12.0.md` | LAN 历史验收记录与剩余验收项 |
 | [GitHub Releases](https://github.com/Ash-Rise/mini-battlegrounds-lan/releases) | 发布记录、更新说明与玩家下载 |
 | `AGENTS.md` | Agent 开发约定 |
 
