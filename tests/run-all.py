@@ -28,6 +28,7 @@ import os
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 import unittest
 from pathlib import Path
@@ -35,6 +36,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 
 UNIT_FILES = [
+    "test-live-runner.py",
     "test-connection-lifecycle.py",
     "test-udp-stats-semantics.py",
     "test-room-and-explosion.py",
@@ -63,8 +65,8 @@ def load_suite(name):
     return unittest.defaultTestLoader.loadTestsFromModule(module)
 
 
-def start_local_server(exe, round_time, slots):
-    env = dict(os.environ,
+def start_local_server(exe, round_time, slots, live_env):
+    env = dict(live_env,
                MBG_TEST_AUTOSTART="1",
                MBG_ROUND_TIME=str(round_time),
                MBG_NO_EMPTY_SHUTDOWN="1")
@@ -97,8 +99,8 @@ def stop_local_server(proc):
 def run_live(here):
     exe = here.parent / "dist" / "server" / "server.exe"
     if not exe.is_file():
-        print("live: SKIP (dist/server/server.exe is not built)")
-        return True
+        print("live: FAIL (dist/server/server.exe is not built)")
+        return False
     # refuse to run over a stale test server: the runner must own the
     # ports, or round lengths and registrations silently mismatch
     probe = socket.socket()
@@ -110,25 +112,29 @@ def run_live(here):
     ok = True
     server = None
     current_round = None
-    try:
-        for name, round_time, slots in LIVE_PLAN:
-            if round_time is not None:
-                if server is None or current_round != (round_time, slots):
+    with tempfile.TemporaryDirectory(prefix="mbg-live-") as temp:
+        profile = Path(temp) / "lan-profiles.json"
+        # Seed an empty file so the server cannot migrate an existing profile.
+        profile.write_text("{}", encoding="utf-8")
+        live_env = dict(os.environ, MBG_PROFILE_PATH=str(profile))
+        try:
+            for name, round_time, slots in LIVE_PLAN:
+                if round_time is not None:
+                    if server is None or current_round != (round_time, slots):
+                        stop_local_server(server)
+                        server = start_local_server(exe, round_time, slots, live_env)
+                        current_round = (round_time, slots)
+                else:
                     stop_local_server(server)
-                    server = start_local_server(exe, round_time, slots)
-                    current_round = (round_time, slots)
-            else:
-                stop_local_server(server)
-                server = None
-                current_round = None
-            print(f"live: {name}")
-            # every live script targets 127.0.0.1 by design; none of them
-            # takes --host
-            result = subprocess.run([sys.executable, str(here / name)])
-            print(f"live: {name}", "PASS" if result.returncode == 0 else "FAIL")
-            ok = ok and result.returncode == 0
-    finally:
-        stop_local_server(server)
+                    server = None
+                    current_round = None
+                print(f"live: {name}")
+                # Child scripts that start a server inherit the isolated profile path.
+                result = subprocess.run([sys.executable, str(here / name)], env=live_env)
+                print(f"live: {name}", "PASS" if result.returncode == 0 else "FAIL")
+                ok = ok and result.returncode == 0
+        finally:
+            stop_local_server(server)
     return ok
 
 

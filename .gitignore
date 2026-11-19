@@ -23,6 +23,7 @@
 !/tests/
 /tests/*
 !/tests/run-all.py
+!/tests/test-live-runner.py
 !/tests/test-public-battle.py
 !/tests/test-connection-lifecycle.py
 !/tests/test-room-and-explosion.py
