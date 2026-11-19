@@ -813,6 +813,9 @@ class Match(asyncio.DatagramProtocol):
         player.world_ticket = randbits(32) or 1
         player.profile_name = profile_name or f"slot-{player.id}"
         duplicate = next((p for p in self.players.values() if p.profile_name == player.profile_name), None)
+        # A lower cap can leave existing players in slots above the new limit.
+        if duplicate is None and len(self.players) >= self.size:
+            raise ValueError("The LAN room is full or already in a match.")
         if duplicate is not None:
             if self.queued or duplicate in self.joined or duplicate.battle is not None:
                 raise ValueError("Choose a different -lan-profile for each client.")
