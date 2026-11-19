@@ -34,6 +34,39 @@ class Writer:
 
 
 class ConnectionLifecycleTests(unittest.IsolatedAsyncioTestCase):
+    async def test_login_counts_members_above_a_reduced_room_cap(self):
+        match = server.Match.__new__(server.Match)
+        match.host = "127.0.0.1"
+        match.slots = 4
+        match.size = 2
+        match.queued = []
+        match.joined = []
+        match.saved_profiles = {}
+        match.skin_catalog = {}
+        match.players = {
+            slot: SimpleNamespace(id=slot, profile_name=f"slot-{slot}", world=Writer())
+            for slot in (1, 4)
+        }
+
+        async def login(writer):
+            reader = asyncio.StreamReader()
+            name = f"new-player|{server.LAN_VERSION}".encode("utf-16le")
+            reader.feed_data(server.frame(20, struct.pack("<IH", 0, len(name)) + name))
+            reader.feed_eof()
+            await match.login(reader, writer)
+
+        rejected = Writer()
+        with self.assertRaisesRegex(ValueError, "room is full"):
+            await login(rejected)
+        self.assertEqual(set(match.players), {1, 4})
+
+        del match.players[4]
+        accepted = Writer()
+        await login(accepted)
+        self.assertEqual(match.players[2].profile_name, "new-player")
+        _, message, error, player_id = struct.unpack_from("<HHHI", accepted.sent[0])
+        self.assertEqual((message, error, player_id), (20, 0, 2))
+
     async def test_stale_writer_cannot_cancel_new_udp_warning(self):
         match = server.Match.__new__(server.Match)
         player = SimpleNamespace(id=1, battle=None, udp=None, disconnected_at=0,
