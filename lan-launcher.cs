@@ -19,10 +19,8 @@ internal sealed class LanLauncher : Form
 {
     private const int DiscoveryPort = 43122;
     private const string ReplyPrefix = "MBG-LAN-ROOM-1 ";
-    private const string CloudHost = "198.51.100.10";
     private static readonly string Client = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "client");
     private static readonly string Settings = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "launcher.ini");
-    private readonly Button cloud = new Button();
     private readonly Button search = new Button();
     private readonly Button create = new Button();
     private readonly Button manual = new Button();
@@ -146,8 +144,6 @@ internal sealed class LanLauncher : Form
 
         status.SetBounds(15, 15, 450, 64);
         status.Text = "版本 v" + LocalVersion() + "\n加入云服务器，或创建/搜索局域网房间。";
-        cloud.SetBounds(15, 85, 450, 40);
-        cloud.Text = "加入云服务器（杭州）";
         create.SetBounds(15, 140, 140, 30);
         create.Text = "创建局域网房间";
         search.SetBounds(165, 140, 110, 30);
@@ -163,10 +159,8 @@ internal sealed class LanLauncher : Form
         firewallButton.SetBounds(15, 180, 140, 30);
         firewallButton.Text = "防火墙放行";
         firewallButton.Click += (sender, args) => AllowFirewall(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "server", "server.exe"));
-        Controls.AddRange(new Control[] { status, cloud, create, search, manual, logButton, firewallButton });
-        AcceptButton = cloud;
+        Controls.AddRange(new Control[] { status, create, search, manual, logButton, firewallButton });
         Shown += async (sender, args) => await CheckForUpdate(applyUpdateSilently);
-        cloud.Click += (sender, args) => JoinHost(CloudHost);
         search.Click += async (sender, args) => await SearchLan();
         manual.Click += (sender, args) => PromptForAddress();
         create.Click += (sender, args) => ToggleRoom();
@@ -406,6 +400,14 @@ internal sealed class LanLauncher : Form
 
     private async Task CheckForUpdate(bool applyUpdateSilently)
     {
+        // Skip the startup check when no update mirror is deployed for the
+        // configured endpoints; the headless --apply-update mode still works
+        // for manual mirror verification.
+        if (UpdateUrls.All(u => new Uri(u).Host == "127.0.0.1" || new Uri(u).Host == "localhost"))
+        {
+            LogUpdate("update server not configured; automatic check skipped");
+            return;
+        }
         UpdateInfo latest;
         try
         {

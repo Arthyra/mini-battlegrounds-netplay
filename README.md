@@ -33,6 +33,21 @@
 
 ### 使用源码运行服务端
 
+需要 Python 3.11+；服务端本体只使用标准库，但启动时读取三个**从原版游戏
+提取的运行时数据文件**（`map102-vehicle-obstacles.json`、
+`map102-vehicle-props.json`、`skin-catalog.json`），它们属于原游戏衍生数据，
+不在本仓库中分发。使用你合法取得的原版游戏生成它们：
+
+```powershell
+# 1. 将原版游戏数据文件 cs_scene_102 与已准备客户端放入仓库的 client/Data/
+# 2. 安装提取依赖并运行提取（在仓库根目录执行）
+pip install UnityPy numpy
+python export-local-data.py
+# 3. 把生成的三个 JSON 复制到服务端运行目录（源码运行即仓库根；打包后为 server/）
+```
+
+
+
 需要 Python 3.11+、对应版本的已准备客户端及服务端依赖数据。LAN 房主可在项目目录执行：
 
 ```powershell
@@ -70,6 +85,24 @@ LAN 游戏的数据通信不依赖 ECS。启动器的公网更新检查已缩短
 | `AGENTS.md` | Agent 开发约定 |
 
 `build-release.py` 需要本地、未提交的合法构建输入，以及与启动器内置公钥配对的签名私钥。发行清单及 ZIP 的地址应按部署环境配置，不能将个人 ECS 地址或密钥硬编码进公共版本。源码提交成功不等于 Windows DLL 已重新构建、测试或发布。
+
+### 从源码重建客户端 DLL 与服务端
+
+```powershell
+# 服务端 exe（需要 PyInstaller）
+python -m PyInstaller --distpath dist/server --workpath build/pyinstaller/build --noconfirm build/pyinstaller/server.spec
+
+# 客户端补丁 DLL（需要用户自备的原版 Assembly-CSharp.dll 与 Mono.Cecil 0.11.6）
+set MBG_PATCH_INPUT=<原版未打补丁的 Assembly-CSharp.dll 路径>
+set MBG_MONO_CECIL=<Mono.Cecil.dll 路径>
+python tools/rebuild-client-dlls.py
+```
+
+DLL 重建会读取仓库 `client/CrazyShooter_Data/Managed/` 下的 Unity/Mono 程序集
+（来自你合法取得的原版游戏），产出打补丁的 `Assembly-CSharp.dll` 与
+`LanRoomUI.dll`，并运行 IL 检查。`export-local-data.py` 的输入同样来自这个
+目录。完整的权威构建配方见 `AGENTS.md`。
+
 
 ## 测试与版本记录
 
