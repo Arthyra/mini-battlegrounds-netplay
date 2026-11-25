@@ -1,4 +1,5 @@
 """Extract private runtime data from the local prepared client."""
+import argparse
 import json
 import struct
 from functools import lru_cache
@@ -8,7 +9,14 @@ import numpy as np
 import UnityPy
 
 root = Path(__file__).resolve().parent
-scene = UnityPy.load(str(root / "client/Data/cs_scene_102"))
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("--client", type=Path, default=root / "client", help="game copy containing Data/")
+parser.add_argument("--output", type=Path, default=root, help="output directory for generated JSON files")
+args = parser.parse_args()
+client = args.client.resolve()
+output = args.output.resolve()
+output.mkdir(parents=True, exist_ok=True)
+scene = UnityPy.load(str(client / "Data/cs_scene_102"))
 level = next(f for name,f in scene.cabs.items() if name=="buildplayer-cs_scene_102")
 transforms = {}
 door_objects = {}
@@ -86,14 +94,14 @@ for obj in level.objects.values():
         props.append((group_id, health, bounds))
     else:
         boxes.append((name, bounds))
-(root / "map102-vehicle-obstacles.json").write_text(
+(output / "map102-vehicle-obstacles.json").write_text(
     "[\n" + ",\n".join("  " + json.dumps(bounds) for _, bounds in boxes) + "\n]\n",
     encoding="utf-8",
 )
 
-(root / "map102-vehicle-props.json").write_text(json.dumps({"movable": props, "doors": doors}) + "\n", encoding="utf-8")
+(output / "map102-vehicle-props.json").write_text(json.dumps({"movable": props, "doors": doors}) + "\n", encoding="utf-8")
 
-database = UnityPy.load(str(root / "client/Data/database"))
+database = UnityPy.load(str(client / "Data/database"))
 skin_text = next(
     obj.read().m_Script for obj in database.objects
     if obj.type.name == "TextAsset" and obj.peek_name() == "SkinData"
@@ -104,5 +112,5 @@ for line in skin_text.splitlines():
         fields = line.split("\t")
         skins.append([int(fields[0]), int(fields[3]), int(fields[4])])
 assert len({kind for kind, _, _ in skins}) == len(skins)
-(root / "skin-catalog.json").write_text(json.dumps(skins) + "\n", encoding="utf-8")
+(output / "skin-catalog.json").write_text(json.dumps(skins) + "\n", encoding="utf-8")
 print(f"Exported {len(boxes)} obstacle boxes, {len(props)} movable props and {len(skins)} skin definitions.")
