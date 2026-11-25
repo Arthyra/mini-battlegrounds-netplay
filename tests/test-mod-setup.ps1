@@ -57,3 +57,6 @@ finally {
     Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $payload -Recurse -Force -ErrorAction SilentlyContinue
 }
+
+# Expected negative test exits must not become the script's final exit status.
+exit 0
