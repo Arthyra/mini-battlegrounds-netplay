@@ -81,7 +81,7 @@ internal sealed class LanLauncher : Form
             var exitCode = 0;
             try
             {
-                var latest = FetchUpdate();
+                var latest = FetchUpdate(ReadUpdateUrls());
                 LogUpdate("manifest ok: v" + latest.Version + " url=" + latest.Url);
                 if (!IsNewer(latest.Version, LocalVersion()))
                     Console.WriteLine("NO-UPDATE current=" + LocalVersion() + " latest=" + latest.Version);
@@ -335,15 +335,17 @@ internal sealed class LanLauncher : Form
         public string Signature;
     }
 
-    // Tried in order. The RSA endpoint (ISRG Root X1) works on older .NET
-    // and Windows builds where the ECDSA/ISRG Root YE chain is untrusted;
-    // New launchers never downgrade to HTTP. Legacy servers can retain the
-    // HTTP entry for old launchers while serving HTTPS URLs in signed manifests.
-    private static readonly string[] UpdateUrls =
+    // Optional manifest mirrors, tried in configured order. A fresh source
+    // build has no update endpoint and starts normally in offline LAN mode.
+    private static string[] ReadUpdateUrls()
     {
-        "https://198.51.100.10:8445/mbg-update/latest.json",
-        "https://198.51.100.10/mbg-update/latest.json",
-    };
+        var urls = (Environment.GetEnvironmentVariable("MBG_UPDATE_MANIFEST_URLS") ?? "")
+            .Split(';').Select(url => url.Trim()).Where(url => url.Length != 0).ToArray();
+        foreach (string url in urls)
+            UpdateUri(url);
+        return urls;
+    }
+
     private static bool applyUpdateSilently;
 
     private static void LogUpdate(string message)
@@ -400,25 +402,23 @@ internal sealed class LanLauncher : Form
 
     private async Task CheckForUpdate(bool applyUpdateSilently)
     {
-        // Skip the startup check when no update mirror is deployed for the
-        // configured endpoints; the headless --apply-update mode still works
-        // for manual mirror verification.
-        if (UpdateUrls.All(u => new Uri(u).Host == "127.0.0.1" || new Uri(u).Host == "localhost"))
-        {
-            LogUpdate("update server not configured; automatic check skipped");
-            return;
-        }
         UpdateInfo latest;
         try
         {
-            latest = await Task.Run(() => FetchUpdate());
+            var urls = ReadUpdateUrls();
+            if (urls.Length == 0)
+            {
+                LogUpdate("update server not configured; automatic check skipped");
+                return;
+            }
+            latest = await Task.Run(() => FetchUpdate(urls));
             LogUpdate("manifest fetched: v" + latest.Version + " url=" + latest.Url);
         }
         catch (InvalidDataException invalid)
         {
-            LogUpdate("manifest signature REJECTED: " + invalid.Message);
+            LogUpdate("update check rejected: " + invalid.Message);
             if (!applyUpdateSilently)
-                MessageBox.Show("更新清单验证失败，已拒绝自动更新：\n" + invalid.Message,
+                MessageBox.Show("更新检查失败，已拒绝自动更新：\n" + invalid.Message,
                     "Mini Battlegrounds", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
@@ -515,10 +515,10 @@ internal sealed class LanLauncher : Form
         catch (FormatException) { return false; }
     }
 
-    private static UpdateInfo FetchUpdate()
+    private static UpdateInfo FetchUpdate(string[] urls)
     {
         Exception lastError = null;
-        foreach (var url in UpdateUrls)
+        foreach (var url in urls)
         {
             try
             {
@@ -534,12 +534,17 @@ internal sealed class LanLauncher : Form
         throw lastError ?? new InvalidOperationException("没有可用的更新服务器。");
     }
 
-    private static HttpWebRequest UpdateRequest(string url, int timeoutSeconds)
+    private static Uri UpdateUri(string url)
     {
         Uri uri;
         if (!Uri.TryCreate(url, UriKind.Absolute, out uri) || uri.Scheme != Uri.UriSchemeHttps)
             throw new InvalidDataException("更新必须使用 HTTPS。");
-        var request = (HttpWebRequest)WebRequest.Create(uri);
+        return uri;
+    }
+
+    private static HttpWebRequest UpdateRequest(string url, int timeoutSeconds)
+    {
+        var request = (HttpWebRequest)WebRequest.Create(UpdateUri(url));
         request.Proxy = null;
         request.AllowAutoRedirect = false;
         // The manifest is tiny: short timeouts so a fully offline LAN party

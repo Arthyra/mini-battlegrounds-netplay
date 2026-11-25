@@ -1,6 +1,9 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Net;
+using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Security.Principal;
 using System.Text;
@@ -30,6 +33,18 @@ internal static class EcsNetworkFault
             int seconds=25;
             if(args.Length<1||args.Length>2||(args[0]!="tcp"&&args[0]!="udp")||(args.Length==2&&(!int.TryParse(args[1],out seconds)||seconds<10||seconds>60)))
             {Console.WriteLine("Usage: ECS-NetworkFault.exe tcp|udp [10..60 seconds]");return 2;}
+            var manifestPath = Path.Combine(Root, "acceptance-build.json");
+            var manifest = new JavaScriptSerializer()
+                .Deserialize<Dictionary<string, object>>(File.ReadAllText(manifestPath));
+            object host;
+            IPAddress target;
+            if (manifest == null || !manifest.TryGetValue("host", out host) ||
+                !IPAddress.TryParse(host as string, out target) ||
+                target.AddressFamily != AddressFamily.InterNetwork ||
+                !string.Equals(target.ToString(), host as string, StringComparison.Ordinal) ||
+                target.Equals(IPAddress.Any) || target.Equals(IPAddress.Broadcast))
+                throw new InvalidDataException("Set the authorized isolated test IPv4 when building acceptance-build.json.");
+
             var principal=new WindowsPrincipal(WindowsIdentity.GetCurrent());
             if(!principal.IsInRole(WindowsBuiltInRole.Administrator))throw new UnauthorizedAccessException("Run this EXE from an administrator terminal.");
             var game=Path.Combine(Root,"client","CrazyShooter.exe");if(!File.Exists(game))throw new FileNotFoundException("Place this EXE beside acceptance-build.json and the client directory.");
@@ -64,7 +79,7 @@ internal static class EcsNetworkFault
                 {
                     dynamic rule=Activator.CreateInstance(Type.GetTypeFromProgID("HNetCfg.FWRule"));
                     rule.Name=group+(direction==2?"-out":"-in");rule.Grouping=group;rule.ApplicationName=game;
-                    rule.Protocol=protocol;rule.RemoteAddresses="198.51.100.10";rule.RemotePorts=port.ToString();
+                    rule.Protocol=protocol;rule.RemoteAddresses=target.ToString();rule.RemotePorts=port.ToString();
                     rule.Direction=direction;rule.Profiles=int.MaxValue;rule.Action=0;rule.Enabled=true;policy.Rules.Add(rule);
                 }
                 record("block_started");Console.WriteLine(args[0]+" "+port+" blocked for "+seconds+" seconds. Keep both games open.");

@@ -6,10 +6,10 @@
 
 ## 版本与进展
 
-- **最新正式版：[v1.0.0 — 功能定版：房主自定义房间 + 稳定性收尾](https://github.com/Ash-Rise/mini-battlegrounds-lan/releases/tag/lan-player-v1.0.0)**。房主可调整人数上限（2–8，受服务器槽位限制），并选择 30、60、120 或 300 秒的回合时长。设置经服务端确认后从下一局生效。本版修复了双开第二客户端卡加载和人数上限调小后无法调回的问题。owner/join 双包已发布。**ECS 更新镜像部署需单独执行**（更新服务按规范仅在 8445 端口）。
+- **最新正式版本记录：[v1.0.0 — 功能定版：房主自定义房间 + 稳定性收尾](https://github.com/Ash-Rise/mini-battlegrounds-lan/releases/tag/lan-player-v1.0.0)**。房主可调整人数上限（2–8，受服务器槽位限制），并选择 30、60、120 或 300 秒的回合时长。设置经服务端确认后从下一局生效。本版修复了双开第二客户端卡加载和人数上限调小后无法调回的问题。
 - **历史版本：[v0.12.0](https://github.com/Ash-Rise/mini-battlegrounds-lan/releases/tag/lan-player-v0.12.0)**。单机协议与跨网卡发现测试及剩余验收项见 [LAN 验收记录](BETA-ACCEPTANCE-v0.12.0.md)。
 
-历史修改与安装包统一以 [GitHub Releases](https://github.com/Ash-Rise/mini-battlegrounds-lan/releases) 为准。单机测试通过不等于两台物理电脑或长期稳定性验收；连续重进地图的内存变化仍需测量。
+开发历史与版本说明见 [GitHub Releases](https://github.com/Ash-Rise/mini-battlegrounds-lan/releases)。单机测试通过不等于两台物理电脑或长期稳定性验收；连续重进地图的内存变化仍需测量。
 
 ## 玩法概览
 
@@ -20,16 +20,16 @@
 
 ## 运行方式
 
-### 已有完整 Windows 玩家包
+### 已持有授权的 Windows 玩家包
 
-在获得授权的私有测试环境中，从对应 [Release](https://github.com/Ash-Rise/mini-battlegrounds-lan/releases) 下载适用的 Windows 包，**完整解压**后运行 `Start Game.exe`。
+已通过授权渠道取得私有测试包的玩家可以完整解压后运行 `Start Game.exe`。从源码开始的玩家请按下一节准备兼容的原版游戏和本地安装器。
 
 - **ECS / 公网**：通过启动器连接已授权的云端房间，或手动指定可访问的服务器 IPv4。
 - 当前房间不支持在进行中的对局里新登录。若已有玩家开局，新玩家需等待这局结束；客户端会重试。此时停留登录页不代表服务器已停止，人数未到上限也不代表允许中途加入。
 - **LAN / 局域网**：房主在 Windows 启动器选择“创建局域网房间”；其他玩家选择“搜索局域网房间”或手动填写房主 IPv4。
 - 创建房间需要安装包包含 `server/server.exe`。部分仅供加入的客户端包可能不含服务端；这种包不能开房。
 
-当前私有发布的 Windows 房主包含有 Unity 程序集和预处理的游戏资源。公开候选需要单独核验这些文件的许可，并排除未获公开分发授权的文件。
+历史 Windows 玩家包含有 Unity 程序集和游戏资源，仅用于授权的私有测试。
 
 ### 一键安装器（仅适用于已验证的地图 102 游戏版本）
 
@@ -102,7 +102,16 @@ LAN 游戏的数据通信不依赖 ECS。启动器的公网更新检查已缩短
 | [GitHub Releases](https://github.com/Ash-Rise/mini-battlegrounds-lan/releases) | 发布记录、更新说明与玩家下载 |
 | `AGENTS.md` | Agent 开发约定 |
 
-`build-release.py` 需要本地、未提交的合法构建输入，以及与启动器内置公钥配对的签名私钥。发行清单及 ZIP 的地址应按部署环境配置，不能将个人 ECS 地址或密钥硬编码进公共版本。源码提交成功不等于 Windows DLL 已重新构建、测试或发布。
+`build-release.py` 用于授权的私有玩家包及其更新清单，需要本地、未提交的合法构建输入和与启动器公钥配对的签名私钥。公开安装器的构建入口是 `steam-install/build-installer.py`。隔离验收包通过 `tools/build-acceptance.py --host` 写入测试服务器 IPv4，随包的故障模拟工具从 `acceptance-build.json` 读取该地址。
+
+源码构建的启动器默认跳过自动更新。需要使用自己管理或获授权的更新镜像时，在启动器进程环境设置 `MBG_UPDATE_MANIFEST_URLS`，填写完整 HTTPS 清单地址。多个地址可用分号分隔，按配置顺序尝试。例如在 PowerShell 中启动：
+
+```powershell
+$env:MBG_UPDATE_MANIFEST_URLS = "https://updates.example.invalid/mbg-update/latest.json"
+& ".\Start Game.exe"
+```
+
+将示例地址换成实际镜像。清单仍须通过 RSA-SHA256 验签，下载包仍须通过 SHA-256 校验。
 
 ### 从源码重建客户端 DLL 与服务端
 
@@ -135,4 +144,4 @@ DLL 重建会读取仓库 `client/CrazyShooter_Data/Managed/` 下的 Unity/Mono 
 
 ## 公开发布与资源说明
 
-仓库目前用于私有开发，包含内部部署及实验历史；**不能直接将整个私有仓库或历史 Release 改为 Public**。将来发布公开 LAN 仓库时，应另行清理历史和个人环境信息，移除专有游戏资产，提供可以由用户自己持有的原版合法构建所生成补丁客户端的安装流程，并确认源码及资源的许可边界。
+项目提供自写的联机服务端、补丁与安装工具源码。原版客户端、地图、Unity 程序集及衍生数据由玩家使用自己合法取得的兼容版本在本机提供。历史私有附件、个人环境信息和相关 GitHub 记录须经清理与复核后，原仓库才可切换公开。
