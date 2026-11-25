@@ -17,6 +17,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Text;
+using System.Security.Cryptography;
 using Microsoft.Win32;
 
 internal static class ModSetup
@@ -27,12 +28,26 @@ internal static class ModSetup
 
     static int Main(string[] args)
     {
+        try { return Install(args); }
+        catch (Exception error) { Fail("安装失败：" + error.Message); return 6; }
+    }
+
+    static int Install(string[] args)
+    {
         Console.OutputEncoding = Encoding.UTF8;
         string game = null, installRoot = null;
+        bool allowUnknown = false, checkOnly = false;
         for (var i = 0; i < args.Length; i++)
         {
             if (args[i] == "--game" && i + 1 < args.Length) game = args[++i];
             else if (args[i] == "--out" && i + 1 < args.Length) installRoot = args[++i];
+            else if (args[i] == "--allow-unknown-version") allowUnknown = true;
+            else if (args[i] == "--check-only") checkOnly = true;
+            else if (args[i] == "--help") {
+                Console.WriteLine("ModSetup.exe --game <directory> [--out <new-directory>] [--check-only]");
+                return 0;
+            }
+            else { Fail("未知或缺少参数值：" + args[i]); return 2; }
         }
 
         Console.WriteLine("Mini Battlegrounds LAN - Steam/standalone game converter");
@@ -67,99 +82,132 @@ internal static class ModSetup
         // literal and the 43120 port constant. Channel builds that predate
         // the map (Steam build 658470 included) fail here by design - they
         // cannot load map 102 no matter how the binary is patched.
-        if (!CheckCompatibility(game))
+        // Validate output *before* copying any files.
+        if (!CheckCompatibility(game, payload, allowUnknown))
             return 3;
 
-        if (string.IsNullOrEmpty(installRoot))
-            installRoot = Path.GetFullPath("MiniBattlegrounds-LAN");
-        Console.WriteLine("安装目录: " + installRoot);
-
-        // ---- copy the player's own game -----------------------------------
-        var clientRoot = Path.Combine(installRoot, "client");
-        Console.WriteLine("复制原版游戏（不修改 Steam 目录）...");
-        CopyDirectory(game, clientRoot, new[] { "output_log.txt" });
-
-        // ---- patch the client assembly -------------------------------------
-        var managed = Path.Combine(clientRoot, "CrazyShooter_Data", "Managed");
-        var patchTool = Path.Combine(payload, "tools", "PatchLanCombat.exe");
-        var cecil = Path.Combine(payload, "tools", "Mono.Cecil.dll");
-        var roomUi = Path.Combine(payload, "LanRoomUI.dll");
-        var original = Path.Combine(managed, "Assembly-CSharp.dll");
-        if (!File.Exists(patchTool) || !File.Exists(cecil) || !File.Exists(roomUi))
-        {
-            Fail("payload 缺少补丁工具（tools\\PatchLanCombat.exe / Mono.Cecil.dll / LanRoomUI.dll）");
-            return 2;
+        installRoot = Path.GetFullPath(string.IsNullOrEmpty(installRoot) ? "MiniBattlegrounds-LAN" : installRoot);
+        var gamePath = game.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var outPath = installRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        bool overlaps = string.Equals(outPath, gamePath, StringComparison.OrdinalIgnoreCase) ||
+            outPath.StartsWith(gamePath + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) ||
+            gamePath.StartsWith(outPath + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+        if (overlaps || Directory.Exists(installRoot) || File.Exists(installRoot)) {
+            Fail("安装目录不能与游戏目录重叠，也不能已经存在。请指定新的独立目录。");
+            return 5;
         }
-        File.Copy(original, original + ".original", true);   // keep a pristine copy
-        Console.WriteLine("应用联机补丁...");
-        // Cecil resolves UnityEngine from the patched dll's directory and the
-        // process cwd - the player's Managed folder carries both, so run the
-        // patch tool there. PatchLanCombat keeps the input module open while
-        // writing, so patch to a temp file and swap on success.
-        var patched = original + ".patched";
-        var patch = Run(patchTool, quote(original) + " " + quote(patched) + " " + quote(roomUi),
-                        managed);
-        if (patch != 0)
-        {
-            Fail("补丁失败（退出码 " + patch + "）- 该游戏版本可能不被支持");
-            return 4;
+        if (checkOnly) { Console.WriteLine("兼容性验证成功（未安装）。"); return 0; }
+        foreach (var name in new[] { "tools/PatchLanCombat.exe", "tools/Mono.Cecil.dll",
+            "LanRoomUI.dll", "server/server.exe", "Start Game.exe", "Updater.exe",
+            "ExtractLocalData.exe" }) {
+            if (!File.Exists(Path.Combine(payload, name.Replace('/', Path.DirectorySeparatorChar)))) {
+                Fail("安装包缺失必要文件：" + name);
+                return 2;
+            }
         }
-        File.Copy(patched, original, true);
-        File.Delete(patched);
-        File.Copy(roomUi, Path.Combine(managed, "LanRoomUI.dll"), true);
-
-        // ---- server + launcher --------------------------------------------
-        var serverSrc = Path.Combine(payload, "server");
-        var serverDst = Path.Combine(installRoot, "server");
-        Console.WriteLine("安装 LAN 服务端...");
-        CopyDirectory(serverSrc, serverDst, null);   // server.exe + 3 extracted JSON data files
-        foreach (var name in new[] { "Start Game.exe", "Updater.exe" })
-        {
-            var src = Path.Combine(payload, name);
-            if (File.Exists(src)) File.Copy(src, Path.Combine(installRoot, name), true);
+        var parent = Path.GetDirectoryName(installRoot);
+        if (string.IsNullOrEmpty(parent) || !Directory.Exists(parent)) {
+            Fail("安装目标的父目录不存在。");
+            return 5;
+        }
+        long requiredBytes = 512L * 1024 * 1024;
+        foreach (var file in Directory.GetFiles(game, "*", SearchOption.AllDirectories))
+            checked { requiredBytes += new FileInfo(file).Length; }
+        var drive = new DriveInfo(Path.GetPathRoot(installRoot));
+        if (!drive.IsReady || drive.AvailableFreeSpace < requiredBytes) {
+            Fail("磁盘空间不足：需要原版游戏大小再加 512MiB 余量。");
+            return 5;
         }
 
-        // ---- summary -------------------------------------------------------
-        Console.WriteLine();
-        Console.WriteLine("安装完成。");
-        Console.WriteLine("  开房: 运行 " + Path.Combine(serverDst, "server.exe") + "（默认 8 人 / 300 秒回合）");
-        Console.WriteLine("  加入: 运行 " + Path.Combine(installRoot, "Start Game.exe") + "，输入房主局域网 IPv4");
-        Console.WriteLine("  端口: TCP 43120/43123/43134，UDP 43135（防火墙放行 server.exe）");
-        if (failures > 0) Console.WriteLine("（过程中有 " + failures + " 个非致命警告）");
-        return 0;
+        // Build in a fresh sibling directory; only publish it on complete success.
+        var stage = installRoot + ".partial-" + Guid.NewGuid().ToString("N");
+        try {
+            var clientRoot = Path.Combine(stage, "client");
+            Console.WriteLine("复制原版游戏到临时目录（原版不变）...");
+            CopyDirectory(game, clientRoot, new[] { "output_log.txt" });
+            var managed = Path.Combine(clientRoot, "CrazyShooter_Data", "Managed");
+            var original = Path.Combine(managed, "Assembly-CSharp.dll");
+            File.Copy(original, original + ".original", false);
+            var patched = original + ".patched";
+            var patch = Run(Path.Combine(payload, "tools", "PatchLanCombat.exe"),
+                quote(original) + " " + quote(patched) + " " + quote(Path.Combine(payload, "LanRoomUI.dll")),
+                managed);
+            if (patch != 0 || !File.Exists(patched)) {
+                Fail("补丁失败（退出码 " + patch + "），临时目录将被清理。");
+                return 4;
+            }
+            File.Copy(patched, original, true);
+            File.Delete(patched);
+            File.Copy(Path.Combine(payload, "LanRoomUI.dll"), Path.Combine(managed, "LanRoomUI.dll"), true);
+
+            var serverDst = Path.Combine(stage, "server");
+            Directory.CreateDirectory(serverDst);
+            File.Copy(Path.Combine(payload, "server", "server.exe"), Path.Combine(serverDst, "server.exe"));
+            Console.WriteLine("从玩家自己的游戏文件生成地图与皮肤数据...");
+            var extract = Run(Path.Combine(payload, "ExtractLocalData.exe"),
+                "--client " + quote(clientRoot) + " --output " + quote(serverDst), stage);
+            if (extract != 0) { Fail("资源提取失败（退出码 " + extract + "）。"); return 4; }
+            foreach (var name in new[] {
+                "map102-vehicle-obstacles.json", "map102-vehicle-props.json", "skin-catalog.json"
+            }) {
+                var file = Path.Combine(serverDst, name);
+                if (!File.Exists(file) || new FileInfo(file).Length == 0) {
+                    Fail("未生成必需的服务器数据：" + name);
+                    return 4;
+                }
+            }
+            foreach (var name in new[] { "Start Game.exe", "Updater.exe", "Fullscreen.exe" }) {
+                var src = Path.Combine(payload, name);
+                if (File.Exists(src)) File.Copy(src, Path.Combine(stage, name));
+            }
+            Directory.Move(stage, installRoot);
+            Console.WriteLine("安装完成：" + installRoot);
+            Console.WriteLine("运行 Start Game.exe 创建或加入 LAN 房间。");
+            return 0;
+        }
+        finally {
+            if (Directory.Exists(stage))
+                try { Directory.Delete(stage, true); }
+                catch (Exception e) { Console.Error.WriteLine("清理临时目录失败：" + e.Message + "，请检查 " + stage); }
+        }
     }
 
     // ---- compatibility gate ----------------------------------------------
-    static bool CheckCompatibility(string game)
+    static bool CheckCompatibility(string game, string payload, bool allowUnknown)
     {
         var managed = Path.Combine(game, "CrazyShooter_Data", "Managed");
         var dll = Path.Combine(managed, "Assembly-CSharp.dll");
         var scene = Path.Combine(game, "Data", WorldScene);
         var problems = new List<string>();
-
-        if (!File.Exists(dll)) problems.Add("缺少 " + dll);
-        if (!File.Exists(scene)) problems.Add("缺少地图 102 场景数据 " + scene + " —— 该渠道的游戏版本不包含地图 102（Steam 版 658470 只有地图 1 与大厅场景），无法运行本 Mod 的地图 102 联机。请使用包含地图 102 的发行版（例如 4399 渠道的最新版）。");
-
-        if (File.Exists(dll))
-        {
+        if (!File.Exists(dll)) problems.Add("缺少原版程序集。");
+        if (!File.Exists(scene)) problems.Add("缺少地图 102 场景；Steam 版不适用。");
+        if (File.Exists(dll)) {
             var bytes = File.ReadAllBytes(dll);
-            var host = Encoding.Unicode.GetBytes("127.0.0.1");
-            var hasHost = IndexOf(bytes, host) >= 0;
-            var portIl = new byte[5];
-            portIl[0] = 0x20;
-            BitConverter.GetBytes((uint)43120).CopyTo(portIl, 1);
-            var hasPort = IndexOf(bytes, portIl) >= 0;
-            if (!hasHost) problems.Add("登录宿主地址常量缺失（非 LAN 化的发行版形态）");
-            if (!hasPort) problems.Add("登录端口常量不是 43120（旧版或 Steam API 登录形态，无法按本项目方式联机）");
+            if (IndexOf(bytes, Encoding.Unicode.GetBytes("127.0.0.1")) < 0)
+                problems.Add("登录地址特征不匹配。");
+            if (IndexOf(bytes, new byte[] { 0x20, 0x70, 0xA8, 0, 0 }) < 0)
+                problems.Add("LAN 登录端口特征不匹配。");
+            string digest;
+            using (var stream = File.OpenRead(dll))
+            using (var sha = SHA256.Create())
+                digest = BitConverter.ToString(sha.ComputeHash(stream)).Replace("-", "").ToLowerInvariant();
+            Console.WriteLine("原版 Assembly-CSharp.dll SHA256: " + digest);
+            var manifest = Path.Combine(payload, "supported-assemblies.sha256");
+            bool known = false;
+            if (File.Exists(manifest))
+                foreach (var line in File.ReadAllLines(manifest)) {
+                    var first = line.Split('#')[0].Trim().Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+                    if (first.Length > 0 && first[0].Length == 64 &&
+                        string.Equals(first[0], digest, StringComparison.OrdinalIgnoreCase)) known = true;
+                }
+            if (!known) {
+                if (allowUnknown) Console.WriteLine("警告：手动允许未知版本，补丁可能失败。");
+                else problems.Add("未通过完整 SHA256 白名单校验，禁止自动安装。");
+            }
         }
-
-        if (problems.Count == 0)
-        {
-            Console.WriteLine("兼容性检查通过：包含地图 102 数据与 LAN 登录形态。");
-            return true;
-        }
-        foreach (var p in problems) Fail(p);
-        return false;
+        foreach (var item in problems) Fail(item);
+        if (problems.Count == 0) Console.WriteLine("兼容性验证通过。");
+        return problems.Count == 0;
     }
 
     // ---- Steam discovery ---------------------------------------------------
@@ -193,30 +241,36 @@ internal static class ModSetup
     static string quote(string path) { return "\"" + path + "\""; }
     static int Run(string exe, string arguments, string workdir)
     {
-        var psi = new ProcessStartInfo(exe, arguments)
-        {
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
+        var psi = new ProcessStartInfo(exe, arguments) {
+            UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = workdir,
+            RedirectStandardOutput = true, RedirectStandardError = true
         };
-        if (workdir != null) psi.WorkingDirectory = workdir;
-        var proc = Process.Start(psi);
-        var stdout = proc.StandardOutput.ReadToEnd();
-        var stderr = proc.StandardError.ReadToEnd();
-        proc.WaitForExit();
-        if (stdout.Length > 0) Console.Write(stdout);
-        if (stderr.Length > 0) { Console.ForegroundColor = ConsoleColor.Yellow; Console.Write(stderr); Console.ResetColor(); }
-        return proc.ExitCode;
+        using (var process = new Process { StartInfo = psi }) {
+            process.OutputDataReceived += delegate(object sender, DataReceivedEventArgs e) {
+                if (e.Data != null) Console.WriteLine(e.Data);
+            };
+            process.ErrorDataReceived += delegate(object sender, DataReceivedEventArgs e) {
+                if (e.Data != null) Console.Error.WriteLine(e.Data);
+            };
+            process.Start();
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
+            process.WaitForExit();
+            return process.ExitCode;
+        }
     }
     static void CopyDirectory(string source, string destination, string[] skip)
     {
+        if ((File.GetAttributes(source) & FileAttributes.ReparsePoint) != 0)
+            throw new IOException("不支持复制符号链接目录：" + source);
         Directory.CreateDirectory(destination);
         foreach (var file in Directory.GetFiles(source))
         {
             var name = Path.GetFileName(file);
             if (skip != null && System.Linq.Enumerable.Contains(skip, name)) continue;
-            File.Copy(file, Path.Combine(destination, name), true);
+            if ((File.GetAttributes(file) & FileAttributes.ReparsePoint) != 0)
+                throw new IOException("不支持复制符号链接文件：" + file);
+            File.Copy(file, Path.Combine(destination, name), false);
         }
         foreach (var dir in Directory.GetDirectories(source))
             CopyDirectory(dir, Path.Combine(destination, Path.GetFileName(dir)), skip);
