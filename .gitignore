@@ -24,6 +24,7 @@
 /tests/*
 !/tests/run-all.py
 !/tests/test-live-runner.py
+!/tests/test-mod-setup.ps1
 !/tests/test-public-battle.py
 !/tests/test-connection-lifecycle.py
 !/tests/test-room-and-explosion.py
@@ -71,3 +72,4 @@ steam-install/dist/
 /steam-install/*
 !/steam-install/ModSetup.cs
 !/steam-install/build-installer.py
+!/steam-install/MONO_CECIL_LICENSE.txt
