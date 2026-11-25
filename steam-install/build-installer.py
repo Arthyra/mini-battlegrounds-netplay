@@ -1,112 +1,112 @@
-"""Assemble the one-shot Mod installer zip for players.
+"""Build a public Mod installer without copying original-game assets.
 
-Inputs (all machine-local, none committed):
-  - repo client\CrazyShooter_Data\Managed\  : patched Assembly-CSharp.dll +
-    LanRoomUI.dll built by tools/rebuild-client-dlls.py
-  - repo dist\server\                       : PyInstaller server.exe + the
-    three extracted runtime-data JSON files
-  - repo dist\rel-verify\Start Game.exe / Updater.exe : launcher built by
-    build-friend-zip.py (or pass --launcher-dir)
-  - repo tools\PatchLanCombat.exe and tools\Mono.Cecil.dll : the patch tool
+Inputs are explicit and local to the release builder; no personal paths or
+extracted map/skin JSON are included in the distributed ZIP.
 
-Output:
-  dist\mbg-lan-mod-setup-<version>.zip containing
-    ModSetup.exe                     this converter (compiled by this script)
-    payload\tools\                   PatchLanCombat.exe + Mono.Cecil.dll
-    payload\LanRoomUI.dll            built room UI
-    payload\server\                  server.exe + JSON data
-    payload\Start Game.exe|Updater.exe
-
-The zip bundles derived data (patched DLL, extracted JSON) that only makes
-sense together with the player's own legally obtained game files - keep it
-out of the public source repository.
+The offline ExtractLocalData.exe is built separately from export-local-data.py
+using PyInstaller, UnityPy and NumPy. Its full dependency notices must be
+supplied with --extractor-notices and reviewed before public distribution.
 """
 import argparse
+import hashlib
 import os
+import shutil
 import subprocess
-import sys
+import tempfile
 import zipfile
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]      # public candidate tree root
-CSC = r"C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
+ROOT = Path(__file__).resolve().parents[1]
+CSC = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Microsoft.NET/Framework64/v4.0.30319/csc.exe"
+
+
+def file_at(path, label):
+    path = Path(path).resolve()
+    if not path.is_file() or path.stat().st_size == 0:
+        raise SystemExit(f"Missing or empty {label}: {path}")
+    return path
+
+
+def copy(source, destination, label):
+    source = file_at(source, label)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(source, destination)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--version", default="1.0.0")
-    parser.add_argument("--client", default=Path(r"C:\GameInstall\mini-battlegrounds-lan\map102-test\client"),
-                        help="prepared client whose Managed dlls are the build output")
-    parser.add_argument("--server-dist", default=ROOT.parent / "map102-test" / "dist" / "server")
-    parser.add_argument("--launcher-dir", default=Path(r"C:\GameInstall\mini-battlegrounds-lan\map102-verify-out\rel-verify")
-                        if Path(r"C:\GameInstall\mini-battlegrounds-lan\map102-verify-out\rel-verify").exists()
-                        else ROOT.parent / "map102-verify-out" / "rel-verify")
-    parser.add_argument("--output", default=ROOT / "dist")
+    parser.add_argument("--client", type=Path, required=True, help="prepared client directory with self-built LanRoomUI.dll")
+    parser.add_argument("--server-dist", type=Path, required=True, help="directory containing freshly built server.exe")
+    parser.add_argument("--launcher-dir", type=Path, required=True, help="directory of freshly compiled launcher EXEs")
+    parser.add_argument("--patch-tools", type=Path, required=True, help="directory containing PatchLanCombat.exe and Mono.Cecil.dll")
+    parser.add_argument("--extractor", type=Path, required=True, help="PyInstaller-built offline ExtractLocalData.exe")
+    parser.add_argument("--extractor-notices", type=Path, required=True, help="complete license notices for the extractor's bundled dependencies")
+    parser.add_argument("--supported-assembly", type=Path, required=True, help="verified PRISTINE Assembly-CSharp.dll (never distributed)")
+    parser.add_argument("--output", type=Path, default=ROOT / "dist")
     args = parser.parse_args()
 
-    work = Path(__file__).resolve().parent / "build"
-    if work.exists():
-        import shutil
-        shutil.rmtree(work)
-    payload = work / "payload"
-    payload_tools = payload / "tools"
-    payload_tools.mkdir(parents=True)
+    pristine = file_at(args.supported_assembly, "verified original Assembly-CSharp.dll")
+    if pristine.name != "Assembly-CSharp.dll":
+        parser.error("--supported-assembly must be a pristine Assembly-CSharp.dll")
+    if not CSC.is_file():
+        parser.error(f".NET Framework csc.exe is missing: {CSC}")
+    version_sha256 = hashlib.sha256(pristine.read_bytes()).hexdigest()
+    print("Fingerprint for the verified original Assembly-CSharp.dll:", version_sha256)
 
-    # 1. compile the converter
-    print("compile ModSetup.exe")
-    subprocess.run([CSC, "/nologo", "/out:" + str(work / "ModSetup.exe"),
-                    str(ROOT / "steam-install" / "ModSetup.cs")], check=True)
+    output = args.output.resolve()
+    output.mkdir(parents=True, exist_ok=True)
+    archive = output / f"mbg-lan-mod-setup-{args.version}.zip"
+    if archive.exists():
+        parser.error(f"Refusing to overwrite an existing installer: {archive}")
 
-    # 2. collect the patch tool
-    for name in ("PatchLanCombat.exe", "Mono.Cecil.dll"):
-        src = ROOT.parent / "map102-test" / "tools" / name
-        if not src.exists():
-            sys.exit("missing " + str(src))
-        (payload_tools / name).write_bytes(src.read_bytes())
+    with tempfile.TemporaryDirectory(prefix="mbg-mod-installer-") as workdir:
+        work = Path(workdir)
+        payload = work / "payload"
+        work.mkdir(exist_ok=True)
+        subprocess.run([
+            str(CSC), "/nologo", "/out:" + str(work / "ModSetup.exe"),
+            str(ROOT / "steam-install/ModSetup.cs")
+        ], check=True)
+        tools = payload / "tools"
+        copy(args.patch_tools / "PatchLanCombat.exe", tools / "PatchLanCombat.exe", "patcher")
+        copy(args.patch_tools / "Mono.Cecil.dll", tools / "Mono.Cecil.dll", "Mono.Cecil 0.11.6")
+        managed = args.client / "CrazyShooter_Data/Managed"
+        copy(managed / "LanRoomUI.dll", payload / "LanRoomUI.dll", "built LanRoomUI.dll")
+        copy(args.server_dist / "server.exe", payload / "server/server.exe", "LAN server")
+        copy(args.extractor, payload / "ExtractLocalData.exe", "local offline data extractor")
+        for name in ("Start Game.exe", "Updater.exe"):
+            copy(args.launcher_dir / name, payload / name, name)
+        fullscreen = args.launcher_dir / "Fullscreen.exe"
+        if fullscreen.is_file():
+            copy(fullscreen, payload / "Fullscreen.exe", "fullscreen helper")
 
-    # 3. room UI + client assembly from the prepared client
-    managed = Path(args.client) / "CrazyShooter_Data" / "Managed"
-    for name in ("Assembly-CSharp.dll", "LanRoomUI.dll"):
-        src = managed / name
-        if not src.exists():
-            sys.exit("missing " + str(src))
-    (payload / "LanRoomUI.dll").write_bytes((managed / "LanRoomUI.dll").read_bytes())
-    # LanRoomUI references the Unity runtime; stage the two assemblies beside
-    # it so the patch tool can resolve the UI module's dependencies.
-    for name in ("UnityEngine.dll", "UnityEngine.UI.dll"):
-        (payload / name).write_bytes((managed / name).read_bytes())
-    # Assembly-CSharp.dll is NOT shipped: ModSetup patches the player's own.
+        (payload / "supported-assemblies.sha256").write_text(
+            version_sha256 + "  Assembly-CSharp.dll\n", encoding="utf-8")
+        copy(ROOT / "steam-install/MONO_CECIL_LICENSE.txt",
+             payload / "MONO_CECIL_LICENSE.txt", "Mono.Cecil license")
+        copy(args.extractor_notices, payload / "EXTRACTOR_NOTICES.txt",
+             "third-party notices for the offline extractor")
 
-    # 4. server + data
-    server_dst = payload / "server"
-    server_dst.mkdir()
-    for name in ("server.exe", "map102-vehicle-obstacles.json",
-                 "map102-vehicle-props.json", "skin-catalog.json"):
-        src = Path(args.server_dist) / name
-        if not src.exists():
-            sys.exit("missing " + str(src))
-        (server_dst / name).write_bytes(src.read_bytes())
+        # Explicit allowlist: no UnityEngine DLLs, no proprietary game data,
+        # no pre-extracted map or skin JSON, and no client runtime.
+        with zipfile.ZipFile(archive, "x", zipfile.ZIP_DEFLATED) as z:
+            z.write(work / "ModSetup.exe", "ModSetup.exe")
+            for path in sorted(payload.rglob("*")):
+                if path.is_file():
+                    z.write(path, (Path("payload") / path.relative_to(payload)).as_posix())
 
-    # 5. launcher
-    for name in ("Start Game.exe", "Updater.exe"):
-        src = Path(args.launcher_dir) / name
-        if not src.exists():
-            sys.exit("missing " + str(src))
-        (payload / name).write_bytes(src.read_bytes())
-
-    # 6. zip
-    out = Path(args.output)
-    out.mkdir(parents=True, exist_ok=True)
-    zip_path = out / ("mbg-lan-mod-setup-" + args.version + ".zip")
-    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as archive:
-        archive.write(work / "ModSetup.exe", "ModSetup.exe")
-        for base, _dirs, files in os.walk(payload):
-            for name in files:
-                full = Path(base) / name
-                archive.write(full, "payload" / full.relative_to(payload))
-    print("installer:", zip_path)
-    print("size:", zip_path.stat().st_size, "bytes")
-
+    with zipfile.ZipFile(archive) as z:
+        names = set(z.namelist())
+        forbidden = [
+            n for n in names
+            if n.lower().endswith((".json", ".unity3d", ".assets", ".apk")) or
+            Path(n).name.lower() in ("unityengine.dll", "unityengine.ui.dll", "assembly-csharp.dll")
+        ]
+        if forbidden:
+            archive.unlink(missing_ok=True)
+            raise SystemExit("Release blocked: forbidden game-derived files: " + repr(forbidden))
+    print(f"Created {archive} ({archive.stat().st_size} bytes)")
 
 if __name__ == "__main__":
     main()
