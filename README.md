@@ -31,26 +31,25 @@
 
 当前私有发布的 Windows 房主包含有 Unity 程序集和预处理的游戏资源。公开候选需要单独核验这些文件的许可，并排除未获公开分发授权的文件。
 
-### 一键安装（已含地图 102 数据的发行版玩家）
+### 一键安装器（仅适用于已验证的地图 102 游戏版本）
 
-拥有含地图 102 数据发行版（4399 渠道最新版）的玩家可以使用一键转换工具，无需 Python、编译器或 Mono.Cecil：
+**Steam App 658470 不支持**：该发行版缺少地图 102 场景，不能使用本 Mod 的现有玩法。玩家需要自己合法取得、包含地图 102 的兼容游戏版本。不会在此仓库或公开安装包提供原游戏文件。
 
-```text
-mbg-lan-mod-setup-<版本>.zip
-  ModSetup.exe                定位/校验游戏 → 复制到独立目录 → 应用补丁 →
-                              安装服务端与启动器（原版文件不被修改）
-  payload\                    补丁工具（Mono.Cecil）、房间 UI、LAN 服务端、
-                              启动器、提取好的运行时数据 JSON
-```
+安装器源码位于 steam-install/。其设计流程是：选择玩家持有的原版目录 → 验证原版程序集完整 SHA256 与场景 → 在新临时目录复制游戏 → 应用补丁 → **从玩家本机资源生成服务端 JSON** → 验证全部产物 → 移动成独立安装目录。出错时不覆盖原版或已有安装目录。未知版本默认拒绝；开发者可显式用 --allow-unknown-version 进行诊断实验。
 
-构建安装包（开发者）：`python steam-install/build-installer.py`（产物为 `dist/mbg-lan-mod-setup-<版本>.zip`；包含从原版游戏衍生的补丁 DLL 与提取 数据，因此**只随发布包分发，不进入公开源码仓库**）。
+**当前为发布候选，尚未完成真实地图 102 版本在干净 Windows 环境中的完整安装、Unity GUI 和物理双机验证。不要把 CI 编译通过当作玩家端验收通过。**
 
-**不支持 Steam 版**：Steam 发行版（App 658470）是早期版本，不含地图 102 场景数据、登录走 Steam API——转换工具会检测并明确拒绝（exit 3，附具体原因），不尝试强行兼容。
-支持的是**包含地图 102 场景数据的发行版**（4399 渠道最新版已实测通过；安装器用已验证的
-原版程序集 SHA256 指纹识别兼容版本，未知版本进入特征诊断后按结果决定）。
+开发者构建**不含原游戏资源的安装 ZIP**时，需先准备自有程序构建产物和一个离线数据提取器：
 
-安装包内的 `payload/LanRoomUI.dll`、`payload/tools/`（补丁工具 + Mono.Cecil）与 `payload/server/`（服务端 exe）是本项目自有代码的构建产物，可以公开分发；`payload/server/*.json` 是从原游戏提取的运行时数据（障碍物/可移动物/皮肤目录），属于原游戏衍生数据——**没有原游戏资源再分发授权，正式发布安装包前需要项目所有者确认这三份 JSON 的分发边界**（源码仓库本身不含它们）。
-安装包**不含**原游戏的任何程序集、场景、素材——玩家必须自备合法取得的原版游戏文件。
+1. python -m pip install PyInstaller UnityPy numpy（仅构建机器需要）。
+2. python -m PyInstaller --onefile --name ExtractLocalData --distpath dist/extractor export-local-data.py，并在干净 Windows 环境验证生成的 ExtractLocalData.exe。
+3. 从已验证的**原版、未打补丁**的 Assembly-CSharp.dll 生成可信版本指纹；将其文件路径作为 --supported-assembly 传给打包脚本。
+4. 准备构建好的 LanRoomUI.dll、PatchLanCombat.exe、Mono.Cecil.dll、server.exe、启动器 EXE，以及提取器包含的 Python/UnityPy/NumPy/PyInstaller 等第三方依赖的完整许可说明。
+5. 在仓库根目录执行（将占位路径替换为本机实际位置）：
+
+    python steam-install/build-installer.py --client "已准备的客户端目录" --server-dist "server.exe所在目录" --launcher-dir "启动器EXE目录" --patch-tools "补丁工具目录" --extractor "dist/extractor/ExtractLocalData.exe" --extractor-notices "提取器第三方许可文件" --supported-assembly "已验证的未修改Assembly-CSharp.dll"
+
+公开安装包采用文件白名单：只包括自写 Mod 工具、Mono.Cecil（附 MIT 许可）、启动器、服务端程序、离线提取器及其许可说明。不打包 Assembly-CSharp.dll、UnityEngine DLL、地图资源或预提取的三个 JSON。**离线提取器的冻结依赖和实际运行仍需要独立核验；在通过版权与端到端验证前，不发布公共二进制安装包。**
 
 ### 使用源码运行服务端
 
@@ -112,8 +111,8 @@ LAN 游戏的数据通信不依赖 ECS。启动器的公网更新检查已缩短
 python -m PyInstaller --distpath dist/server --workpath build/pyinstaller/build --noconfirm build/pyinstaller/server.spec
 
 # 客户端补丁 DLL（需要用户自备的原版 Assembly-CSharp.dll 与 Mono.Cecil 0.11.6）
-set MBG_PATCH_INPUT=<原版未打补丁的 Assembly-CSharp.dll 路径>
-set MBG_MONO_CECIL=<Mono.Cecil.dll 路径>
+$env:MBG_PATCH_INPUT = "<原版未打补丁的 Assembly-CSharp.dll 路径>"
+$env:MBG_MONO_CECIL = "<Mono.Cecil.dll 路径>"
 python tools/rebuild-client-dlls.py
 ```
 
