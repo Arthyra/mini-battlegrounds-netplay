@@ -16,8 +16,9 @@ jobs:
         run: python tests/run-all.py
       - name: Check build and acceptance scripts without private assets
         run: |
-          python -m py_compile build-friend-zip.py build-release.py tools/build-acceptance.py tools/ecs-isolated-server.py tools/check-build-inputs.py
+          python -m py_compile build-friend-zip.py build-release.py export-local-data.py steam-install/build-installer.py tools/build-acceptance.py tools/ecs-isolated-server.py tools/check-build-inputs.py
           python build-friend-zip.py --help
+          python steam-install/build-installer.py --help
           python tools/build-acceptance.py --help
           python tools/ecs-isolated-server.py --help
 
@@ -58,3 +59,10 @@ jobs:
         run: |
           C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe -nologo -out:UpdatePolicyTest.exe tests\test-update-policy.cs
           UpdatePolicyTest.exe StartGame.exe
+
+      - name: Compile and safety-test public Mod installer
+        shell: pwsh
+        run: |
+          & "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe" /nologo /out:steam-install\ModSetup.exe steam-install\ModSetup.cs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & ./tests/test-mod-setup.ps1
