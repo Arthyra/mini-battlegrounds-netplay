@@ -37,6 +37,7 @@ HERE = Path(__file__).resolve().parent
 
 UNIT_FILES = [
     "test-live-runner.py",
+    "test-installer-builder.py",
     "test-connection-lifecycle.py",
     "test-udp-stats-semantics.py",
     "test-room-and-explosion.py",
