@@ -1,4 +1,4 @@
-# Agent instructions — Mini Battlegrounds LAN
+# Agent instructions — Mini Battlegrounds Netplay
 
 本文件是项目级、长期有效的约定；一次性任务的 Goal 不应写进这里。
 

@@ -1,4 +1,6 @@
-# v0.12.0 LAN Beta — 候选版本验收结论（不公开发布）
+# Mini Battlegrounds Netplay · v0.12.0 历史验收记录
+
+以下安装包名称和摘要用于对应当时的验收记录。Netplay 仓库保留历史 Tag，早期玩家包不在此仓库分发。
 
 **已发布：v1.0.0（2026-11-19，commit `8625eaa`，功能定版）**
 - Release：`lan-player-v1.0.0`（附件下载复验一致）

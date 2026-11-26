@@ -1,4 +1,4 @@
-# 从源码构建和运行
+# 从源码构建和运行 Mini Battlegrounds Netplay
 
 ## Windows 本地 Mod 安装包
 

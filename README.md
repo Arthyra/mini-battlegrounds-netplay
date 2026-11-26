@@ -1,8 +1,8 @@
-# Mini Battlegrounds LAN
+# Mini Battlegrounds Netplay
 
-Mini Battlegrounds LAN 是非官方的 Windows 多人联机恢复项目，围绕地图 102 提供独立的房间服务。可在局域网发现房间或直连，也可加入自行部署的公网服务器。支持 1–8 人、大厅准备、房主开局、回合设置、战斗、计分、复活和断线重连。
+Mini Battlegrounds Netplay 是非官方的 Windows 多人联机恢复项目，围绕地图 102 提供独立的房间服务。可在局域网发现房间或直连，也可加入自行部署的公网服务器。支持 1–8 人、大厅准备、房主开局、回合设置、战斗、计分、复活和断线重连。
 
-**当前不兼容 Steam 原版（App 658470）**。该发行版缺少地图 102。每位玩家需要合法持有包含地图 102 的兼容 Windows 客户端。项目不提供原游戏、地图、Unity 程序集、素材或提取数据。[GitHub Releases](https://github.com/Ash-Rise/mini-battlegrounds-lan/releases) 目前提供版本记录和源码快照，没有完整游戏安装包或预构建补丁安装器。
+**当前不兼容 Steam 原版（App 658470）**。该发行版缺少地图 102。每位玩家需要合法持有包含地图 102 的兼容 Windows 客户端。本仓库提供源码和历史 Tag。原游戏、地图、Unity 程序集、素材、提取数据和预构建安装包均不随仓库分发。 [历史 Tag](https://github.com/Ash-Rise/mini-battlegrounds-netplay/tags)
 
 ## 开始联机
 
