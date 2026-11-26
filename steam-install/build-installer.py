@@ -91,6 +91,7 @@ def main():
         # Explicit allowlist: no UnityEngine DLLs, no proprietary game data,
         # no pre-extracted map or skin JSON, and no client runtime.
         with zipfile.ZipFile(archive, "x", zipfile.ZIP_DEFLATED) as z:
+            z.write(ROOT / "LICENSE", "LICENSE")
             z.write(work / "ModSetup.exe", "ModSetup.exe")
             for path in sorted(payload.rglob("*")):
                 if path.is_file():

@@ -67,6 +67,7 @@ class InstallerArchiveTests(unittest.TestCase):
             with zipfile.ZipFile(result) as z:
                 names = set(z.namelist())
                 self.assertIn("ModSetup.exe", names)
+                self.assertEqual(z.read("LICENSE"), (ROOT / "LICENSE").read_bytes())
                 self.assertIn("payload/ExtractLocalData.exe", names)
                 self.assertIn("payload/MONO_CECIL_LICENSE.txt", names)
                 self.assertIn("payload/EXTRACTOR_NOTICES.txt", names)

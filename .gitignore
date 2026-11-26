@@ -5,6 +5,8 @@
 !/.github/
 !/AGENTS.md
 !/README.md
+!/BUILDING.md
+!/LICENSE
 !/admin_server.py
 !/server.py
 !/lan_share.py
