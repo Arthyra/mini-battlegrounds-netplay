@@ -6,6 +6,9 @@
 !/AGENTS.md
 !/README.md
 !/BUILDING.md
+!/assets/
+/assets/*
+!/assets/gameplay-map102.png
 !/LICENSE
 !/admin_server.py
 !/server.py

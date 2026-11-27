@@ -1,8 +1,21 @@
 # Mini Battlegrounds Netplay
 
+![地图 102 双人联机实机画面：射击、淘汰提示与击杀榜](assets/gameplay-map102.png)
+
 Mini Battlegrounds Netplay 是非官方的 Windows 多人联机恢复项目，围绕地图 102 提供独立的房间服务。可在局域网发现房间或直连，也可加入自行部署的公网服务器。支持 1–8 人、大厅准备、房主开局、回合设置、战斗、计分、复活和断线重连。
 
-**当前不兼容 Steam 原版（App 658470）**。该发行版缺少地图 102。每位玩家需要合法持有包含地图 102 的兼容 Windows 客户端。本仓库提供源码和历史 Tag。原游戏、地图、Unity 程序集、素材、提取数据和预构建安装包均不随仓库分发。 [历史 Tag](https://github.com/Ash-Rise/mini-battlegrounds-netplay/tags)
+**当前不兼容 Steam 原版（App 658470）**。该发行版缺少地图 102。每位玩家需要合法持有包含地图 102 的兼容 Windows 客户端。本仓库提供源码、补丁工具和构建指南；原游戏、地图、Unity 程序集、素材、提取数据和预构建安装包均不随仓库分发。
+
+## 最新版本：v1.0.0
+
+[v1.0.0 — 房主自定义房间](https://github.com/Ash-Rise/mini-battlegrounds-netplay/releases/tag/lan-player-v1.0.0) 在现有联机玩法基础上加入房主设置：
+
+- **人数上限**：房主可在大厅设置 2–8 人，受服务端可用槽位限制。
+- **回合时长**：提供 30、60、120、300 秒选项，设置从下一局生效。
+- **设置确认**：大厅显示服务端确认后的配置；对局进行中锁定修改，开局名单遵守人数上限。
+- **大厅操作**：通过独立设置弹窗调整房间，保留准备、开局、改名和角色选择流程。
+
+此 Release 提供版本说明与源码下载。安装与运行方法见下方及[构建指南](BUILDING.md)。
 
 ## 开始联机
 
@@ -17,7 +30,7 @@ Mini Battlegrounds Netplay 是非官方的 Windows 多人联机恢复项目，�
 
 Windows 构建需要 Python 3.11+、.NET Framework C# 编译器、Mono.Cecil 0.11.6 和合法兼容客户端。数据提取需要 UnityPy 和 NumPy。打包需要 PyInstaller。完整命令及输入目录见[构建指南](BUILDING.md)。
 
-`python tests/run-all.py` 运行自动化回归。真实地图 102 的干净 Windows 安装、Unity GUI、长时间运行和跨机器断线恢复仍有未完成的验收项。见 [LAN 验收记录](BETA-ACCEPTANCE-v0.12.0.md)。
+`python tests/run-all.py` 运行自动化回归。真实地图 102 的干净 Windows 安装、Unity GUI、长时间运行和跨机器断线恢复仍有未完成的验收项；单机测试结果不能替代双机及长期运行验证。
 
 ## 许可与声明
 
