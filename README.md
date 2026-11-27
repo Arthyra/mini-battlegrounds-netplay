@@ -8,7 +8,7 @@ Mini Battlegrounds Netplay 是非官方的 Windows 多人联机恢复项目，�
 
 ## 最新版本：v1.0.0
 
-[v1.0.0 — 房主自定义房间](https://github.com/Ash-Rise/mini-battlegrounds-netplay/releases/tag/lan-player-v1.0.0) 在现有联机玩法基础上加入房主设置：
+[v1.0.0 — 房主自定义房间](https://github.com/Arthyra/mini-battlegrounds-netplay/releases/tag/lan-player-v1.0.0) 在现有联机玩法基础上加入房主设置：
 
 - **人数上限**：房主可在大厅设置 2–8 人，受服务端可用槽位限制。
 - **回合时长**：提供 30、60、120、300 秒选项，设置从下一局生效。
